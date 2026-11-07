@@ -1,0 +1,6 @@
+feature_idx,feature_name,lower_bound,upper_bound,bound_source
+0,hr,,,categorical
+1,temp,0.0,1.0,physical
+2,workingday,,,binary
+3,hum,0.0,1.0,physical
+4,season,,,categorical

@@ -1,0 +1,16 @@
+{
+  "dgp": "extreme_tail",
+  "irrelevant_features": 10,
+  "original_feature_count": 2,
+  "original_features": [
+    "X1",
+    "X2"
+  ],
+  "noise_seed": 2026,
+  "n_rows": 5000,
+  "n_splits": 5,
+  "source_dir": "datasets/dgp/extreme_tail",
+  "prediction_reference": "unchanged known DGP model; added columns ignored",
+  "bounds": "original bounds reused; noise columns padded by 10%",
+  "mse_features": "original features only"
+}

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local Python and R environments
+env/.venv/
+env/R/library/
+.Rhistory
+.RData
+.Ruserdata
+
+# Generated outputs
+results/
+*.log
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# test file
+test

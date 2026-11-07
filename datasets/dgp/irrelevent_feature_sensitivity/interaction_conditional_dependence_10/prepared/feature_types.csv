@@ -1,0 +1,14 @@
+feature_idx,feature_name,feature_type
+0,X1,continuous
+1,X2,continuous
+2,X3,continuous
+3,irrelevant_1,continuous
+4,irrelevant_2,continuous
+5,irrelevant_3,continuous
+6,irrelevant_4,continuous
+7,irrelevant_5,continuous
+8,irrelevant_6,continuous
+9,irrelevant_7,continuous
+10,irrelevant_8,continuous
+11,irrelevant_9,continuous
+12,irrelevant_10,continuous
