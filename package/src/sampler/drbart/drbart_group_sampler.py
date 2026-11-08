@@ -158,42 +158,42 @@ class DRBartGroupSampler(DRBartSampler):
 
     def sample_group_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         return self._sample_group_batch(
-            evaluation_sample=evaluation_sample,
+            X_eval=X_eval,
             feature_indices=feature_indices,
-            replacement_sample_size=replacement_sample_size,
+            n_resamples=n_resamples,
             mode="lucid",
         )
 
 
     def _sample_group_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         mode,
         factor_posterior_ids=None,
     ):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
 
-        evaluation_sample = np.asarray(evaluation_sample)
+        X_eval = np.asarray(X_eval)
 
-        if evaluation_sample.ndim != 2:
-            raise ValueError("evaluation_sample must be a 2D array.")
-        if evaluation_sample.shape[1] != self.feature_size:
-            raise ValueError("evaluation_sample has the wrong number of features.")
+        if X_eval.ndim != 2:
+            raise ValueError("X_eval must be a 2D array.")
+        if X_eval.shape[1] != self.feature_size:
+            raise ValueError("X_eval has the wrong number of features.")
 
         feature_indices = np.asarray(feature_indices)
         if feature_indices.ndim != 1:
             raise ValueError("feature_indices must be a 1D array.")
-        if replacement_sample_size <= 0:
-            raise ValueError("replacement_sample_size must be positive.")
+        if n_resamples <= 0:
+            raise ValueError("n_resamples must be positive.")
         if mode not in {"lucid","credible_interval"}:
             raise ValueError("mode must be either 'lucid' or 'credible_interval'.")
 
@@ -213,14 +213,14 @@ class DRBartGroupSampler(DRBartSampler):
                     "factor_posterior_ids must have the same length as feature_indices."
                 )
 
-        evaluation_sample_size = evaluation_sample.shape[0]
+        n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
 
         samples = np.empty(
             (
-                evaluation_sample_size,
+                n_eval,
                 selected_feature_size,
-                replacement_sample_size,
+                n_resamples,
             )
         )  # save the whole replacement samples as samples for group feature 
 
@@ -235,13 +235,13 @@ class DRBartGroupSampler(DRBartSampler):
             fit_dir = factor_fit["fit_dir"]
 
             if local_j == 0:
-                conditioning_data = evaluation_sample[:,conditioning_indices]  # all features reamining here 
+                conditioning_data = X_eval[:,conditioning_indices]  # all features reamining here 
 
                 if feature_type in {"binary","categorical"}:
-                    replacement_samples = self.bart_sampler.sample_conditioning_batch(
+                    replacement_values = self.bart_sampler.sample_conditioning_batch(
                         conditioning_data=conditioning_data,
                         fit_dir=fit_dir,
-                        replacement_sample_size=replacement_sample_size,
+                        n_resamples=n_resamples,
                         posterior_id=(
                             factor_posterior_ids[local_j]
                             if mode == "credible_interval"
@@ -249,10 +249,10 @@ class DRBartGroupSampler(DRBartSampler):
                         ),
                     )
                 else:
-                    replacement_samples = self._sample_batch_from_r(
-                        evaluation_sample_minus_j=conditioning_data,
+                    replacement_values = self._sample_batch_from_r(
+                        X_eval_minus_j=conditioning_data,
                         fit_dir=fit_dir,
-                        replacement_sample_size=replacement_sample_size,
+                        n_resamples=n_resamples,
                         mode=mode,
                         posterior_id=(
                             factor_posterior_ids[local_j]
@@ -261,16 +261,16 @@ class DRBartGroupSampler(DRBartSampler):
                         ),
                     )
 
-                samples[:,local_j,:] = replacement_samples  # shape: (evaluation_sample_size, 1, replacement_sample_size)
+                samples[:,local_j,:] = replacement_values  # shape: (n_eval, 1, n_resamples)
                 continue
 
             conditioning_data = np.empty(
                 (
-                    evaluation_sample_size,
-                    replacement_sample_size,
+                    n_eval,
+                    n_resamples,
                     len(conditioning_indices),
                 )
-            )  # shape: (evaluation_sample_size, replacement_sample_size, len(conditioning_indices))
+            )  # shape: (n_eval, n_resamples, len(conditioning_indices))
 
             for conditioning_local_j,conditioning_idx in enumerate(conditioning_indices):
                 if conditioning_idx in feature_to_local:
@@ -280,19 +280,19 @@ class DRBartGroupSampler(DRBartSampler):
                     )
                 else:
                     conditioning_data[:,:,conditioning_local_j] = (
-                        evaluation_sample[:,conditioning_idx,None]
+                        X_eval[:,conditioning_idx,None]
                     )
             # So the output will look like (in 3D):
             #           -s[ repeat replacement sample_size times ]
             #       -s[ repeat replacement sample_size times ]
-            #   x[x(1), ... , x(replacement_sample_size)]
+            #   x[x(1), ... , x(n_resamples)]
             # 
             # Then for each conditioning_data[i, j, :]
             # is the obersation i; posterior j; 's remaining feature
             # | x_i_{in group}^{posterior=j}, -S_i
 
             conditioning_data = conditioning_data.reshape(
-                evaluation_sample_size * replacement_sample_size,
+                n_eval * n_resamples,
                 len(conditioning_indices),
             )  # We then flatten the data, so each row represents a | x_i_{in group}^{posterior=j}, -S_i
 
@@ -301,13 +301,13 @@ class DRBartGroupSampler(DRBartSampler):
                 if mode == "lucid":
                     path_ids = self.rng.integers(
                         1, factor_fit["posterior_count"] + 1,
-                        size=replacement_sample_size,
+                        size=n_resamples,
                     )
-                    row_posterior_ids = np.tile(path_ids,evaluation_sample_size)
-                replacement_samples = self.bart_sampler.sample_conditioning_batch(
+                    row_posterior_ids = np.tile(path_ids,n_eval)
+                replacement_values = self.bart_sampler.sample_conditioning_batch(
                     conditioning_data=conditioning_data,
                     fit_dir=fit_dir,
-                    replacement_sample_size=1,  # we have flattened the data
+                    n_resamples=1,  # we have flattened the data
                     row_posterior_ids=row_posterior_ids,
                     posterior_id=(
                         factor_posterior_ids[local_j]
@@ -316,10 +316,10 @@ class DRBartGroupSampler(DRBartSampler):
                     ),
                 )
             else:
-                replacement_samples = self._sample_batch_from_r(
-                    evaluation_sample_minus_j=conditioning_data,
+                replacement_values = self._sample_batch_from_r(
+                    X_eval_minus_j=conditioning_data,
                     fit_dir=fit_dir,
-                    replacement_sample_size=1,
+                    n_resamples=1,
                     mode=mode,
                     posterior_id=(
                         factor_posterior_ids[local_j]
@@ -327,20 +327,20 @@ class DRBartGroupSampler(DRBartSampler):
                         else None
                     ),
                 )
-            replacement_samples = replacement_samples.reshape(
-                evaluation_sample_size,
-                replacement_sample_size,
+            replacement_values = replacement_values.reshape(
+                n_eval,
+                n_resamples,
             )
-            samples[:,local_j,:] = replacement_samples
+            samples[:,local_j,:] = replacement_values
 
         return samples
 
     
     def sample_group_batch_posterior_credible_interval(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         posterior_id,
         X_reference=None,
     ):
@@ -384,9 +384,9 @@ class DRBartGroupSampler(DRBartSampler):
         ])
 
         return self._sample_group_batch(
-            evaluation_sample=evaluation_sample,
+            X_eval=X_eval,
             feature_indices=feature_indices,
-            replacement_sample_size=replacement_sample_size,
+            n_resamples=n_resamples,
             mode="credible_interval",
             factor_posterior_ids=factor_posterior_ids,
         )

@@ -7,7 +7,7 @@ def lucid_single_observation_single_feature(
     x: np.ndarray, 
     y, 
     replacement_sample:np.ndarray, 
-    replacement_sample_batch_size: int, 
+    n_resamples_batch: int, 
     loss_type: str, 
     model: callable, 
     feature_idx:int,
@@ -30,8 +30,8 @@ def lucid_single_observation_single_feature(
         Target value for the observation.
     replacement_sample : np.ndarray
         Replacement values for feature j, with shape
-        (n_replacement_samples,).
-    replacement_sample_batch_size : int
+        (n_resamples,).
+    n_resamples_batch : int
         Number of replacement samples evaluated per model call.
     loss_type : str
         Loss function passed to ``loss.prediction_loss``.
@@ -47,9 +47,9 @@ def lucid_single_observation_single_feature(
         Estimated LUCID for the observation-feature pair.
     """
     # calculate LUCID for observation i and feature j
-    # 1/replacement_sample_size * sum (loss[g(X_j', x_{-j}), y] - loss[g(x_j, x_{-j}), y])
+    # 1/n_resamples * sum (loss[g(X_j', x_{-j}), y] - loss[g(x_j, x_{-j}), y])
     x = np.asarray(x)
-    replacement_sample = np.asarray(replacement_sample) # shape (replacement_sample_size, )
+    replacement_sample = np.asarray(replacement_sample) # shape (n_resamples, )
 
     if x.ndim != 1:
         raise ValueError("x must be a 1D feature vector.")
@@ -57,11 +57,11 @@ def lucid_single_observation_single_feature(
     if not 0 <= feature_idx < x.shape[0]:
         raise ValueError("feature_idx is out of range.")
 
-    if replacement_sample_batch_size <= 0:
-        raise ValueError("replacement_sample_batch_size must be positive.")
+    if n_resamples_batch <= 0:
+        raise ValueError("n_resamples_batch must be positive.")
     
-    replacement_sample_size = len(replacement_sample)
-    if replacement_sample_size == 0:
+    n_resamples = len(replacement_sample)
+    if n_resamples == 0:
         raise ValueError("replacement_sample must not be empty.")
 
     # sklearn-style models generally expect shape (n_samples, n_features)
@@ -73,25 +73,25 @@ def lucid_single_observation_single_feature(
     # x_minus_j = np.delete(x, feature_idx) 
     
     total_loss = 0.0
-    for start in range(0, replacement_sample_size, replacement_sample_batch_size):
-        X_j_prime = replacement_sample[start:start+replacement_sample_batch_size] # shape (replacement_sample_batch_size,); maybe less than replacement_sample_batch_size for the last batch
+    for start in range(0, n_resamples, n_resamples_batch):
+        X_j_prime = replacement_sample[start:start+n_resamples_batch] # shape (n_resamples_batch,); maybe less than n_resamples_batch for the last batch
         current_batch_size = len(X_j_prime)
-        x_prime = np.repeat(x.reshape(1,-1), current_batch_size, axis=0).astype(float) # shape (replacement_sample_batch_size, feature_size)
+        x_prime = np.repeat(x.reshape(1,-1), current_batch_size, axis=0).astype(float) # shape (n_resamples_batch, feature_size)
         x_prime[:, feature_idx] = X_j_prime
         batch_loss = loss.prediction_loss(model(x_prime), y, loss_type) 
         total_loss += np.sum(batch_loss)
-    return total_loss / replacement_sample_size - baseline_loss
+    return total_loss / n_resamples - baseline_loss
 
 
 # for all evaluations and one feature
 def lucid_all_evaluations_one_feature( 
-    evaluation_sample:np.ndarray,  
-    evaluation_sample_batch_size:int,  
+    X_eval:np.ndarray,  
+    n_eval_batch:int,  
     evaluation_target:np.ndarray, 
     feature_idx:int, 
     sampler:callable, 
-    replacement_sample_size: int,
-    replacement_sample_batch_size:int, 
+    n_resamples: int,
+    n_resamples_batch:int, 
     loss_type: str, 
     model: callable 
 )->np.ndarray: 
@@ -102,9 +102,9 @@ def lucid_all_evaluations_one_feature(
  
     Parameters 
     ---------- 
-    evaluation_sample : np.ndarray 
+    X_eval : np.ndarray 
         Evaluation data with shape (n_samples, n_features). 
-    evaluation_sample_batch_size : int 
+    n_eval_batch : int 
         Number of evaluation observations processed per batch. 
     evaluation_target : np.ndarray 
         Targets with shape (n_samples,). 
@@ -113,18 +113,18 @@ def lucid_all_evaluations_one_feature(
     sampler : callable 
         Function with signature 
  
-            sampler(evaluation_sample_batch, feature_indices) 
+            sampler(X_eval_batch, feature_indices) 
  
         returning replacement samples with shape 
  
             ( 
-                current_evaluation_batch_size, 
+                current_n_eval_batch, 
                 current_feature_batch_size, 
-                n_replacement_samples, 
+                n_resamples, 
             ). 
-    replacement_sample_size: int
+    n_resamples: int
         Number of replacement samples to generate
-    replacement_sample_batch_size : int 
+    n_resamples_batch : int 
         Number of replacement samples evaluated per model call. 
     loss_type : str 
         Loss function passed to ``loss.prediction_loss``. 
@@ -136,66 +136,66 @@ def lucid_all_evaluations_one_feature(
     np.ndarray 
         LUCID values with shape (n_samples,). 
     """ 
-    # For each time we only deal with evaluation_sample_batch_size 
+    # For each time we only deal with n_eval_batch 
     # replacement_sample is generated by different sampling methods  
-    # evaluation_sample has shape (evaluation_sample_size, feature_size) 
+    # X_eval has shape (n_eval, feature_size) 
      
  
-    evaluation_sample = np.asarray(evaluation_sample) 
-    if evaluation_sample.ndim != 2: 
-        raise ValueError("evaluation_sample must be a 2D array.") 
+    X_eval = np.asarray(X_eval) 
+    if X_eval.ndim != 2: 
+        raise ValueError("X_eval must be a 2D array.") 
      
     evaluation_target = np.asarray(evaluation_target) 
     if evaluation_target.ndim != 1: 
         raise ValueError("evaluation_target must be a 1D array.") 
          
-    evaluation_sample_size, feature_size = evaluation_sample.shape 
-    if len(evaluation_target) != evaluation_sample_size: 
+    n_eval, feature_size = X_eval.shape 
+    if len(evaluation_target) != n_eval: 
         raise ValueError( 
-            "evaluation_target must have the same number of observations as evaluation_sample." 
+            "evaluation_target must have the same number of observations as X_eval." 
         ) 
  
-    if evaluation_sample_batch_size <= 0: 
-        raise ValueError("evaluation_sample_batch_size must be positive.") 
+    if n_eval_batch <= 0: 
+        raise ValueError("n_eval_batch must be positive.") 
  
     if not 0 <= feature_idx < feature_size: 
         raise ValueError("feature_idx is out of range.") 
          
-    lucid_result = np.empty(evaluation_sample_size) 
-    baseline_prediction = model(evaluation_sample)
+    lucid_result = np.empty(n_eval) 
+    baseline_prediction = model(X_eval)
     baseline_loss = loss.prediction_loss(baseline_prediction,evaluation_target,loss_type)
-    for start_evaluation in range(0, evaluation_sample_size, evaluation_sample_batch_size): 
-        end_evaluation = min(start_evaluation + evaluation_sample_batch_size,evaluation_sample_size,) 
-        evaluation_indices = np.arange(start_evaluation, end_evaluation)  # shape (evaluation_sample_batch_size,) 
+    for start_evaluation in range(0, n_eval, n_eval_batch): 
+        end_evaluation = min(start_evaluation + n_eval_batch,n_eval,) 
+        evaluation_indices = np.arange(start_evaluation, end_evaluation)  # shape (n_eval_batch,) 
         # Keep ALL features here 
-        evaluation_sample_batch = evaluation_sample[start_evaluation:end_evaluation, :] # shape (evaluation_sample_batch_size, feature_size) 
+        X_eval_batch = X_eval[start_evaluation:end_evaluation, :] # shape (n_eval_batch, feature_size) 
         feature_indices = np.array([feature_idx]) # shape (1,) 
         # sampler generates replacement samples for 
         # every evaluation observation × the selected feature 
-        replacement_samples = sampler.sample_batch(
-            evaluation_sample=evaluation_sample_batch,
+        replacement_values = sampler.sample_batch(
+            X_eval=X_eval_batch,
             feature_indices=feature_indices,
-            replacement_sample_size=replacement_sample_size,
-            X_reference=evaluation_sample,
-        )  # shape(current_evaluation_batch_size, 1, replacement_sample_size) 
+            n_resamples=n_resamples,
+            X_reference=X_eval,
+        )  # shape(current_n_eval_batch, 1, n_resamples) 
         # then calculate lucid for each observation in the batch 
         for local_eval_idx, global_eval_idx in enumerate(evaluation_indices): 
-            x = evaluation_sample_batch[local_eval_idx]  # shape (feature_size, ). This is x_i 
-            replacement_sample = replacement_samples[local_eval_idx, 0]  # shape (replacement_sample_size,) 
+            x = X_eval_batch[local_eval_idx]  # shape (feature_size, ). This is x_i 
+            replacement_sample = replacement_values[local_eval_idx, 0]  # shape (n_resamples,) 
             y = evaluation_target[global_eval_idx]  # shape(1,). This is y_i     
             # now we have x_i, y_i, and the replacement sample for x_i,j. We can use lucid_single_observation_single_feature to calculate the LUCID 
-            lucid_result[global_eval_idx] = lucid_single_observation_single_feature(x, y, replacement_sample, replacement_sample_batch_size, loss_type, model, feature_idx, baseline_loss[global_eval_idx]) 
-    return lucid_result  # shape(evaluation_sample_size,)
+            lucid_result[global_eval_idx] = lucid_single_observation_single_feature(x, y, replacement_sample, n_resamples_batch, loss_type, model, feature_idx, baseline_loss[global_eval_idx]) 
+    return lucid_result  # shape(n_eval,)
 
 # for all evaluations and all features; however, for real large dataset run lucid_all_evaluations_single_features in parallel is faster.
 def lucid_all_evaluations_all_features(
-    evaluation_sample:np.ndarray, 
-    evaluation_sample_batch_size:int, 
+    X_eval:np.ndarray, 
+    n_eval_batch:int, 
     evaluation_target:np.ndarray,
     feature_batch_size:int,
     sampler:callable,
-    replacement_sample_size: int,
-    replacement_sample_batch_size:int,
+    n_resamples: int,
+    n_resamples_batch:int,
     loss_type: str,
     model: callable
 )->np.ndarray:
@@ -206,9 +206,9 @@ def lucid_all_evaluations_all_features(
 
     Parameters
     ----------
-    evaluation_sample : np.ndarray
+    X_eval : np.ndarray
         Evaluation data with shape (n_samples, n_features).
-    evaluation_sample_batch_size : int
+    n_eval_batch : int
         Number of evaluation observations processed per batch.
     evaluation_target : np.ndarray
         Targets with shape (n_samples,).
@@ -217,18 +217,18 @@ def lucid_all_evaluations_all_features(
     sampler : callable
         Function with signature
 
-            sampler(evaluation_sample_batch, feature_indices)
+            sampler(X_eval_batch, feature_indices)
 
         returning replacement samples with shape
 
             (
-                current_evaluation_batch_size,
+                current_n_eval_batch,
                 current_feature_batch_size,
-                n_replacement_samples,
+                n_resamples,
             ).
-    replacement_sample_size: int
+    n_resamples: int
         Number of replacement samples to generate
-    replacement_sample_batch_size : int
+    n_resamples_batch : int
         Number of replacement samples evaluated per model call.
     loss_type : str
         Loss function passed to ``loss.prediction_loss``.
@@ -240,73 +240,73 @@ def lucid_all_evaluations_all_features(
     np.ndarray
         LUCID values with shape (n_samples, n_features).
     """
-    # For each time we only deal with evaluation_sample_batch_size and feature_batch_size
+    # For each time we only deal with n_eval_batch and feature_batch_size
     # replacement_sample is generated by different sampling methods 
-    # evaluation_sample has shape (evaluation_sample_size, feature_size)
+    # X_eval has shape (n_eval, feature_size)
     
 
-    evaluation_sample = np.asarray(evaluation_sample)
-    if evaluation_sample.ndim != 2:
-        raise ValueError("evaluation_sample must be a 2D array.")
+    X_eval = np.asarray(X_eval)
+    if X_eval.ndim != 2:
+        raise ValueError("X_eval must be a 2D array.")
     
     evaluation_target = np.asarray(evaluation_target)
     if evaluation_target.ndim != 1:
         raise ValueError("evaluation_target must be a 1D array.")
         
-    evaluation_sample_size, feature_size = evaluation_sample.shape
-    if len(evaluation_target) != evaluation_sample_size:
+    n_eval, feature_size = X_eval.shape
+    if len(evaluation_target) != n_eval:
         raise ValueError(
-            "evaluation_target must have the same number of observations as evaluation_sample."
+            "evaluation_target must have the same number of observations as X_eval."
         )
 
-    if evaluation_sample_batch_size <= 0:
-        raise ValueError("evaluation_sample_batch_size must be positive.")
+    if n_eval_batch <= 0:
+        raise ValueError("n_eval_batch must be positive.")
 
     if feature_batch_size <= 0:
         raise ValueError("feature_batch_size must be positive.")
         
-    lucid_result = np.empty((evaluation_sample_size, feature_size))
-    baseline_prediction = model(evaluation_sample)
+    lucid_result = np.empty((n_eval, feature_size))
+    baseline_prediction = model(X_eval)
     baseline_loss = loss.prediction_loss(baseline_prediction,evaluation_target,loss_type)
-    for start_evaluation in range(0, evaluation_sample_size, evaluation_sample_batch_size):
-        end_evaluation = min(start_evaluation + evaluation_sample_batch_size,evaluation_sample_size,)
-        evaluation_indices = np.arange(start_evaluation, end_evaluation)  # shape (evaluation_sample_batch_size,)
+    for start_evaluation in range(0, n_eval, n_eval_batch):
+        end_evaluation = min(start_evaluation + n_eval_batch,n_eval,)
+        evaluation_indices = np.arange(start_evaluation, end_evaluation)  # shape (n_eval_batch,)
         # Keep ALL features here
-        evaluation_sample_batch = evaluation_sample[start_evaluation:end_evaluation, :] # shape (evaluation_sample_batch_size, feature_size)
+        X_eval_batch = X_eval[start_evaluation:end_evaluation, :] # shape (n_eval_batch, feature_size)
         for start_feature in range(0, feature_size, feature_batch_size):
             end_feature = min(start_feature + feature_batch_size,feature_size,)
             feature_indices = np.arange(start_feature, end_feature) # shape (feature_batch_size,)
             # sampler generates replacement samples for
             # every evaluation observation × every selected feature
-            replacement_samples = sampler.sample_batch(
-                evaluation_sample=evaluation_sample_batch,
+            replacement_values = sampler.sample_batch(
+                X_eval=X_eval_batch,
                 feature_indices=feature_indices,
-                replacement_sample_size=replacement_sample_size,
-                X_reference=evaluation_sample,
-            )  # shape(current_evaluation_batch_size, current_feature_batch_size, replacement_sample_size)
+                n_resamples=n_resamples,
+                X_reference=X_eval,
+            )  # shape(current_n_eval_batch, current_feature_batch_size, n_resamples)
 
             # then calculate lucid for each cell in the block bath
             for local_eval_idx, global_eval_idx in enumerate(evaluation_indices):
-                x = evaluation_sample_batch[local_eval_idx]  # shape (feature_size, ). This is x_i
+                x = X_eval_batch[local_eval_idx]  # shape (feature_size, ). This is x_i
                 for feature_idx in feature_indices:
                     # feature_idx is feature j
-                    replacement_sample = replacement_samples[local_eval_idx, feature_idx - start_feature]  # shape (replacement_sample_size,)
+                    replacement_sample = replacement_values[local_eval_idx, feature_idx - start_feature]  # shape (n_resamples,)
                     y = evaluation_target[global_eval_idx]  # shape(1,). This is y_i
                     # now we have x_i, y_i, and the replacement sample for x_i,j. We can use lucid_single_observation_single_feature to calculate the LUCID
-                    lucid_result[global_eval_idx, feature_idx] = lucid_single_observation_single_feature(x, y, replacement_sample, replacement_sample_batch_size, loss_type, model, feature_idx, baseline_loss[global_eval_idx])
-    return lucid_result  # shape(evaluation_sample_size, feature_size)
+                    lucid_result[global_eval_idx, feature_idx] = lucid_single_observation_single_feature(x, y, replacement_sample, n_resamples_batch, loss_type, model, feature_idx, baseline_loss[global_eval_idx])
+    return lucid_result  # shape(n_eval, feature_size)
 
 
 def lucid_one_feature_end_to_end(
     X_train,
-    evaluation_sample,
-    evaluation_sample_batch_size,
+    X_eval,
+    n_eval_batch,
     evaluation_target,
     feature_idx,
     feature_type,
     sampler,
-    replacement_sample_size,
-    replacement_sample_batch_size,
+    n_resamples,
+    n_resamples_batch,
     loss_type,
     model,
 ):
@@ -318,9 +318,9 @@ def lucid_one_feature_end_to_end(
             feature_type=feature_type,
             model=model,
         )
-        prediction = model.predict(evaluation_sample)
+        prediction = model.predict(X_eval)
         prediction_minus_j = sampler.predict_batch(
-            evaluation_sample=evaluation_sample,
+            X_eval=X_eval,
             feature_idx=feature_idx,
         )
         baseline_loss = loss.prediction_loss(
@@ -342,13 +342,13 @@ def lucid_one_feature_end_to_end(
     )
 
     return lucid_all_evaluations_one_feature(
-        evaluation_sample=evaluation_sample,
-        evaluation_sample_batch_size=evaluation_sample_batch_size,
+        X_eval=X_eval,
+        n_eval_batch=n_eval_batch,
         evaluation_target=evaluation_target,
         feature_idx=feature_idx,
         sampler=sampler,
-        replacement_sample_size=replacement_sample_size,
-        replacement_sample_batch_size=replacement_sample_batch_size,
+        n_resamples=n_resamples,
+        n_resamples_batch=n_resamples_batch,
         loss_type=loss_type,
         model=model,
     )
@@ -356,13 +356,13 @@ def lucid_one_feature_end_to_end(
 
 def lucid_all_evaluations_all_features_end_to_end(
     X_train:np.ndarray,
-    evaluation_sample:np.ndarray,
-    evaluation_sample_batch_size:int,
+    X_eval:np.ndarray,
+    n_eval_batch:int,
     evaluation_target:np.ndarray,
     feature_types,
     sampler:callable,
-    replacement_sample_size:int,
-    replacement_sample_batch_size:int,
+    n_resamples:int,
+    n_resamples_batch:int,
     loss_type:str,
     model:callable
 )->np.ndarray:
@@ -380,41 +380,41 @@ def lucid_all_evaluations_all_features_end_to_end(
     if X_train.ndim != 2:
         raise ValueError("X_train must be a 2D array.")
 
-    evaluation_sample = np.asarray(evaluation_sample)
-    if evaluation_sample.ndim != 2:
-        raise ValueError("evaluation_sample must be a 2D array.")
+    X_eval = np.asarray(X_eval)
+    if X_eval.ndim != 2:
+        raise ValueError("X_eval must be a 2D array.")
 
     evaluation_target = np.asarray(evaluation_target)
     if evaluation_target.ndim != 1:
         raise ValueError("evaluation_target must be a 1D array.")
 
-    evaluation_sample_size,feature_size = evaluation_sample.shape
+    n_eval,feature_size = X_eval.shape
 
     if X_train.shape[1] != feature_size:
-        raise ValueError("X_train and evaluation_sample must have the same number of features.")
+        raise ValueError("X_train and X_eval must have the same number of features.")
 
-    if len(evaluation_target) != evaluation_sample_size:
-        raise ValueError("evaluation_target must have the same number of observations as evaluation_sample.")
+    if len(evaluation_target) != n_eval:
+        raise ValueError("evaluation_target must have the same number of observations as X_eval.")
 
-    if evaluation_sample_batch_size <= 0:
-        raise ValueError("evaluation_sample_batch_size must be positive.")
+    if n_eval_batch <= 0:
+        raise ValueError("n_eval_batch must be positive.")
 
     if len(feature_types) != feature_size:
         raise ValueError("feature_types must have one entry for every feature.")
 
-    lucid_result = np.empty((evaluation_sample_size,feature_size))
+    lucid_result = np.empty((n_eval,feature_size))
 
     for feature_idx in range(feature_size):
         lucid_result[:,feature_idx] = lucid_one_feature_end_to_end(
             X_train=X_train,
-            evaluation_sample=evaluation_sample,
-            evaluation_sample_batch_size=evaluation_sample_batch_size,
+            X_eval=X_eval,
+            n_eval_batch=n_eval_batch,
             evaluation_target=evaluation_target,
             feature_idx=feature_idx,
             feature_type=feature_types[feature_idx],
             sampler=sampler,
-            replacement_sample_size=replacement_sample_size,
-            replacement_sample_batch_size=replacement_sample_batch_size,
+            n_resamples=n_resamples,
+            n_resamples_batch=n_resamples_batch,
             loss_type=loss_type,
             model=model,
         )
@@ -427,8 +427,8 @@ def lucid_all_evaluations_all_features_end_to_end(
 def lucid_single_observation_group(
     x: np.ndarray,
     y,
-    replacement_samples: np.ndarray,
-    replacement_sample_batch_size: int,
+    replacement_values: np.ndarray,
+    n_resamples_batch: int,
     loss_type: str,
     model: callable,
     feature_indices,
@@ -437,12 +437,12 @@ def lucid_single_observation_group(
     """
     Compute LUCID for one observation and one feature group.
 
-    replacement_samples has shape:
-        (group_size, replacement_sample_size)
+    replacement_values has shape:
+        (group_size, n_resamples)
     """
 
     x = np.asarray(x)
-    replacement_samples = np.asarray(replacement_samples)
+    replacement_values = np.asarray(replacement_values)
     feature_indices = np.asarray(feature_indices,dtype=int)
 
     if x.ndim != 1:
@@ -460,21 +460,21 @@ def lucid_single_observation_group(
     if np.any(feature_indices < 0) or np.any(feature_indices >= x.shape[0]):
         raise ValueError("feature_indices contains an out-of-range feature index.")
 
-    if replacement_samples.ndim != 2:
-        raise ValueError("replacement_samples must be a 2D array.")
+    if replacement_values.ndim != 2:
+        raise ValueError("replacement_values must be a 2D array.")
 
-    if replacement_samples.shape[0] != len(feature_indices):
+    if replacement_values.shape[0] != len(feature_indices):
         raise ValueError(
-            "replacement_samples must have one row for every feature in feature_indices."
+            "replacement_values must have one row for every feature in feature_indices."
         )
 
-    if replacement_sample_batch_size <= 0:
-        raise ValueError("replacement_sample_batch_size must be positive.")
+    if n_resamples_batch <= 0:
+        raise ValueError("n_resamples_batch must be positive.")
 
-    replacement_sample_size = replacement_samples.shape[1]
+    n_resamples = replacement_values.shape[1]
 
-    if replacement_sample_size == 0:
-        raise ValueError("replacement_samples must not be empty.")
+    if n_resamples == 0:
+        raise ValueError("replacement_values must not be empty.")
 
     if baseline_loss is None:
         baseline_prediction = model(x.reshape(1,-1))
@@ -484,10 +484,10 @@ def lucid_single_observation_group(
 
     for start in range(
         0,
-        replacement_sample_size,
-        replacement_sample_batch_size,
+        n_resamples,
+        n_resamples_batch,
     ):
-        group_prime = replacement_samples[:,start:start + replacement_sample_batch_size,]
+        group_prime = replacement_values[:,start:start + n_resamples_batch,]
         current_batch_size = group_prime.shape[1]
         x_prime = np.repeat(
             x.reshape(1,-1),
@@ -499,17 +499,17 @@ def lucid_single_observation_group(
 
         total_loss += np.sum(batch_loss)
 
-    return total_loss / replacement_sample_size - baseline_loss
+    return total_loss / n_resamples - baseline_loss
 
 
 def lucid_all_evaluations_group(
-    evaluation_sample: np.ndarray,
-    evaluation_sample_batch_size: int,
+    X_eval: np.ndarray,
+    n_eval_batch: int,
     evaluation_target: np.ndarray,
     feature_indices,
     sampler: callable,
-    replacement_sample_size: int,
-    replacement_sample_batch_size: int,
+    n_resamples: int,
+    n_resamples_batch: int,
     loss_type: str,
     model: callable,
 )->np.ndarray:
@@ -517,25 +517,25 @@ def lucid_all_evaluations_group(
     Compute group LUCID for every evaluation observation.
     """
 
-    evaluation_sample = np.asarray(evaluation_sample)
+    X_eval = np.asarray(X_eval)
 
-    if evaluation_sample.ndim != 2:
-        raise ValueError("evaluation_sample must be a 2D array.")
+    if X_eval.ndim != 2:
+        raise ValueError("X_eval must be a 2D array.")
 
     evaluation_target = np.asarray(evaluation_target)
 
     if evaluation_target.ndim != 1:
         raise ValueError("evaluation_target must be a 1D array.")
 
-    evaluation_sample_size,feature_size = evaluation_sample.shape
+    n_eval,feature_size = X_eval.shape
 
-    if len(evaluation_target) != evaluation_sample_size:
+    if len(evaluation_target) != n_eval:
         raise ValueError(
-            "evaluation_target must have the same number of observations as evaluation_sample."
+            "evaluation_target must have the same number of observations as X_eval."
         )
 
-    if evaluation_sample_batch_size <= 0:
-        raise ValueError("evaluation_sample_batch_size must be positive.")
+    if n_eval_batch <= 0:
+        raise ValueError("n_eval_batch must be positive.")
 
     feature_indices = np.asarray(feature_indices,dtype=int)
 
@@ -553,42 +553,42 @@ def lucid_all_evaluations_group(
             "feature_indices contains an out-of-range feature index."
         )
 
-    lucid_result = np.empty(evaluation_sample_size)
+    lucid_result = np.empty(n_eval)
 
-    baseline_prediction = model(evaluation_sample)
+    baseline_prediction = model(X_eval)
 
     baseline_loss = loss.prediction_loss(baseline_prediction,evaluation_target,loss_type,)
 
     for start_evaluation in range(
         0,
-        evaluation_sample_size,
-        evaluation_sample_batch_size,
+        n_eval,
+        n_eval_batch,
     ):
-        end_evaluation = min(start_evaluation + evaluation_sample_batch_size,evaluation_sample_size,)
+        end_evaluation = min(start_evaluation + n_eval_batch,n_eval,)
 
         evaluation_indices = np.arange(start_evaluation,end_evaluation,)
 
-        evaluation_sample_batch = evaluation_sample[start_evaluation:end_evaluation,:]
+        X_eval_batch = X_eval[start_evaluation:end_evaluation,:]
 
-        replacement_samples = sampler.sample_group_batch(
-            evaluation_sample=evaluation_sample_batch,
+        replacement_values = sampler.sample_group_batch(
+            X_eval=X_eval_batch,
             feature_indices=feature_indices,
-            replacement_sample_size=replacement_sample_size,
-            X_reference=evaluation_sample,
+            n_resamples=n_resamples,
+            X_reference=X_eval,
         )
-        # shape: (current_evaluation_batch_size, group_size, replacement_sample_size)
+        # shape: (current_n_eval_batch, group_size, n_resamples)
         
         for local_eval_idx,global_eval_idx in enumerate(evaluation_indices):
-            x = evaluation_sample_batch[local_eval_idx]
+            x = X_eval_batch[local_eval_idx]
             y = evaluation_target[global_eval_idx]
-            replacement_sample = replacement_samples[local_eval_idx,:,:]  # (group_size, replacement_sample_size)
+            replacement_sample = replacement_values[local_eval_idx,:,:]  # (group_size, n_resamples)
         
 
             lucid_result[global_eval_idx] = lucid_single_observation_group(
                 x=x,
                 y=y,
-                replacement_samples=replacement_sample,
-                replacement_sample_batch_size=replacement_sample_batch_size,
+                replacement_values=replacement_sample,
+                n_resamples_batch=n_resamples_batch,
                 loss_type=loss_type,
                 model=model,
                 feature_indices=feature_indices,
@@ -602,14 +602,14 @@ def lucid_all_evaluations_group(
 
 def lucid_group_end_to_end(
     X_train,
-    evaluation_sample,
-    evaluation_sample_batch_size,
+    X_eval,
+    n_eval_batch,
     evaluation_target,
     feature_indices,
     feature_types,
     sampler,
-    replacement_sample_size,
-    replacement_sample_batch_size,
+    n_resamples,
+    n_resamples_batch,
     loss_type,
     model,
 ):
@@ -620,18 +620,18 @@ def lucid_group_end_to_end(
             "X_train must be a 2D array."
         )
 
-    evaluation_sample = np.asarray(
-        evaluation_sample
+    X_eval = np.asarray(
+        X_eval
     )
 
-    if evaluation_sample.ndim != 2:
+    if X_eval.ndim != 2:
         raise ValueError(
-            "evaluation_sample must be a 2D array."
+            "X_eval must be a 2D array."
         )
 
-    if X_train.shape[1] != evaluation_sample.shape[1]:
+    if X_train.shape[1] != X_eval.shape[1]:
         raise ValueError(
-            "X_train and evaluation_sample must have the same number of features."
+            "X_train and X_eval must have the same number of features."
         )
 
     feature_indices = np.asarray(feature_indices,dtype=int,)
@@ -658,13 +658,13 @@ def lucid_group_end_to_end(
     )
 
     return lucid_all_evaluations_group(
-        evaluation_sample=evaluation_sample,
-        evaluation_sample_batch_size=evaluation_sample_batch_size,
+        X_eval=X_eval,
+        n_eval_batch=n_eval_batch,
         evaluation_target=evaluation_target,
         feature_indices=feature_indices,
         sampler=sampler,
-        replacement_sample_size=replacement_sample_size,
-        replacement_sample_batch_size=replacement_sample_batch_size,
+        n_resamples=n_resamples,
+        n_resamples_batch=n_resamples_batch,
         loss_type=loss_type,
         model=model,
     )

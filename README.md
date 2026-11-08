@@ -1,4 +1,42 @@
+# LUCID competition
+During the cleaning process our code env follows:
+
+```
+cd /home/users/yw676/projects/VI/LUCID_competition
+
+source /usr/xtmp/$USER/envs/lucid/bin/activate
+
+export R_LIBS_USER=/home/users/yw676/Rlibs
+export R_PROFILE_USER=/dev/null
+export R_ENVIRON_USER=/dev/null
+export PYTHONDONTWRITEBYTECODE=1
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # LUCID supplementary code
+
+
+
+
+
+
+
+
+
+
 
 This directory contains the calculation package, datasets, experiment
 scripts, and examples for reproducing one feature on one held-out fold.

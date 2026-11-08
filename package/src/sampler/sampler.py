@@ -33,7 +33,7 @@ class Sampler(ABC):
         self,
         x,
         feature_idx,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         """
@@ -42,37 +42,37 @@ class Sampler(ABC):
 
         Returns
         -------
-        replacements : ndarray of shape (replacement_sample_size,)
+        replacements : ndarray of shape (n_resamples,)
         """
         pass
     
     def sample_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
-        evaluation_sample = np.asarray(evaluation_sample)
+        X_eval = np.asarray(X_eval)
         feature_indices = np.asarray(feature_indices)
 
-        evaluation_sample_size = evaluation_sample.shape[0]
+        n_eval = X_eval.shape[0]
         feature_size = len(feature_indices)
 
         samples = np.empty(
-            (evaluation_sample_size, feature_size, replacement_sample_size)
+            (n_eval, feature_size, n_resamples)
         )
 
-        for i, x in enumerate(evaluation_sample):
+        for i, x in enumerate(X_eval):
             for local_j, feature_idx in enumerate(feature_indices):
                 samples[i, local_j] = self.sample(
                     x=x,
                     feature_idx=feature_idx,
-                    replacement_sample_size=replacement_sample_size,
+                    n_resamples=n_resamples,
                     X_reference=X_reference,
                 )
 
-        return samples
+        return samples  # (n_eval, n_selected_features, n_resamples)
     
 
     def _next_r_seed(self):

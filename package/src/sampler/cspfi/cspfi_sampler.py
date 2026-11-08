@@ -19,7 +19,7 @@ class CSPFISampler(Sampler):
         super().__init__(random_state=random_state)
 
         self.output_dir = Path(output_dir)
-        self.exchange_dir = Path(os.environ.get("LUCID_EXCHANGE_DIR", "results/tmp"))
+        self.exchange_dir = self.output_dir / "exchange"
         self.exchange_dir.mkdir(parents=True, exist_ok=True)
         self.feature_types = feature_types
         self.seed = seed
@@ -66,7 +66,7 @@ class CSPFISampler(Sampler):
     def sample(
         self,
         x,
-        replacement_sample_size,
+        n_resamples,
         X_reference,
     ):
         if self.fit_dir is None:
@@ -91,20 +91,20 @@ class CSPFISampler(Sampler):
                 str(X_file),
                 str(X_reference_file),
                 str(output_file),
-                str(replacement_sample_size),
+                str(n_resamples),
                 str(self._next_r_seed()),
             ],
             check=True,
         )
-        replacement_samples = np.loadtxt(output_file,delimiter=",")
-        return np.asarray(replacement_samples).reshape(-1)
+        replacement_values = np.loadtxt(output_file,delimiter=",")
+        return np.asarray(replacement_values).reshape(-1)
 
     
     def sample_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         if self.fit_dir is None:
@@ -121,7 +121,7 @@ class CSPFISampler(Sampler):
                 "Requested feature does not match the fitted feature."
             )
 
-        X = np.asarray(evaluation_sample)
+        X = np.asarray(X_eval)
         X_reference = np.asarray(X_reference)
         if X.ndim != 2:
             raise ValueError("X must be a 2D array.")
@@ -141,10 +141,10 @@ class CSPFISampler(Sampler):
                 str(X_file),
                 str(X_reference_file),
                 str(output_file),
-                str(replacement_sample_size),
+                str(n_resamples),
                 str(self._next_r_seed()),
             ],
             check=True,
         )
-        replacement_samples = np.loadtxt(output_file,delimiter=",")
-        return np.asarray(replacement_samples).reshape(len(X),1,replacement_sample_size)
+        replacement_values = np.loadtxt(output_file,delimiter=",")
+        return np.asarray(replacement_values).reshape(len(X),1,n_resamples)

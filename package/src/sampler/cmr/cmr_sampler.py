@@ -51,7 +51,7 @@ class CMRSampler(Sampler):
 
         return self
     
-    def sample(self, x, feature_idx, replacement_sample_size, X_reference:np.ndarray):
+    def sample(self, x, feature_idx, n_resamples, X_reference:np.ndarray):
         if not self.is_fitted:
             raise RuntimeError(
                 "Sampler must be fitted before sampling."
@@ -62,9 +62,9 @@ class CMRSampler(Sampler):
                 "The sampler has not been fitted for this feature."
             )
 
-        if replacement_sample_size <= 0:
+        if n_resamples <= 0:
             raise ValueError(
-                "replacement_sample_size must be positive."
+                "n_resamples must be positive."
             )
 
         x = np.asarray(x)
@@ -95,20 +95,20 @@ class CMRSampler(Sampler):
         x_minus_j = np.delete(x,feature_idx,).reshape(1, -1)
         conditional_mean_x = model.predict(x_minus_j).item()
 
-        X_reference_minus_j = np.delete(X_reference, feature_idx, axis=1)  # shape (evaluation_sample_size, feature_size-1)
-        conditional_mean_reference = model.predict(X_reference_minus_j)  # shape (evaluation_sample_size,)
+        X_reference_minus_j = np.delete(X_reference, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
+        conditional_mean_reference = model.predict(X_reference_minus_j)  # shape (n_eval,)
         reference_residuals = X_reference[:, feature_idx]-conditional_mean_reference
-        sampled_residuals = self.rng.choice(reference_residuals,size=replacement_sample_size,replace=True,)
-        replacement_samples = (conditional_mean_x + sampled_residuals)
+        sampled_residuals = self.rng.choice(reference_residuals,size=n_resamples,replace=True,)
+        replacement_values = (conditional_mean_x + sampled_residuals)
 
-        return replacement_samples
+        return replacement_values
 
     # rewrite sample batch, since for each batch we do not want predict for each samples!
     def sample_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         if not self.is_fitted:
@@ -117,17 +117,17 @@ class CMRSampler(Sampler):
             )
 
 
-        evaluation_sample = np.asarray(evaluation_sample)
+        X_eval = np.asarray(X_eval)
 
-        if evaluation_sample.ndim != 2:
+        if X_eval.ndim != 2:
             raise ValueError(
-                "evaluation_sample must be a 2D array."
+                "X_eval must be a 2D array."
             )
 
 
-        if evaluation_sample.shape[1] != self.feature_size:
+        if X_eval.shape[1] != self.feature_size:
             raise ValueError(
-                "evaluation_sample has the wrong number of features."
+                "X_eval has the wrong number of features."
             )
 
 
@@ -139,9 +139,9 @@ class CMRSampler(Sampler):
             )
 
 
-        if replacement_sample_size <= 0:
+        if n_resamples <= 0:
             raise ValueError(
-                "replacement_sample_size must be positive."
+                "n_resamples must be positive."
             )
 
 
@@ -159,10 +159,10 @@ class CMRSampler(Sampler):
             )
 
 
-        evaluation_sample_size = evaluation_sample.shape[0]
+        n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
         samples = np.empty(
-                (evaluation_sample_size, selected_feature_size, replacement_sample_size)
+                (n_eval, selected_feature_size, n_resamples)
             )
         for local_j, feature_idx in enumerate(feature_indices):
             if feature_idx not in self.models:
@@ -172,17 +172,17 @@ class CMRSampler(Sampler):
 
             model = self.models[feature_idx]
             # predict conditional mean for the whole evaluation batch
-            evaluation_sample_minus_j = np.delete(evaluation_sample,feature_idx,axis=1,)
-            conditional_mean_evaluation = model.predict(evaluation_sample_minus_j)  # shape (evaluation_sample_size,)
+            X_eval_minus_j = np.delete(X_eval,feature_idx,axis=1,)
+            conditional_mean_evaluation = model.predict(X_eval_minus_j)  # shape (n_eval,)
 
             # calculate residual pool on the reference dataset
-            X_reference_minus_j = np.delete(X_reference, feature_idx, axis=1)  # shape (evaluation_sample_size, feature_size-1)
-            conditional_mean_reference = model.predict(X_reference_minus_j)  # shape (evaluation_sample_size,)
+            X_reference_minus_j = np.delete(X_reference, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
+            conditional_mean_reference = model.predict(X_reference_minus_j)  # shape (n_eval,)
             reference_residuals = X_reference[:, feature_idx]-conditional_mean_reference
-            sampled_residuals = self.rng.choice(reference_residuals,size=(evaluation_sample_size,replacement_sample_size,),replace=True,)  # shape (evaluation_sample_size, replacement_sample_size)
+            sampled_residuals = self.rng.choice(reference_residuals,size=(n_eval,n_resamples,),replace=True,)  # shape (n_eval, n_resamples)
 
 
-            replacement_samples = (conditional_mean_evaluation[:, None]+ sampled_residuals) # shape (evaluation_sample_size, replacement_sample_size)
-            samples[:, local_j, :] = replacement_samples
+            replacement_values = (conditional_mean_evaluation[:, None]+ sampled_residuals) # shape (n_eval, n_resamples)
+            samples[:, local_j, :] = replacement_values
 
         return samples

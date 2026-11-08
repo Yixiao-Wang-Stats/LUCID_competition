@@ -37,18 +37,18 @@ class LOCOSampler(Sampler):
         self.is_fitted = True
         return self
 
-    def predict_batch(self,evaluation_sample,feature_idx):
+    def predict_batch(self,X_eval,feature_idx):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before prediction.")
         if feature_idx not in self.models:
             raise RuntimeError("The sampler has not been fitted for this feature.")
-        evaluation_sample = np.asarray(evaluation_sample)
-        if evaluation_sample.ndim != 2:
-            raise ValueError("evaluation_sample must be a 2D array.")
-        if evaluation_sample.shape[1] != self.feature_size:
-            raise ValueError("evaluation_sample has the wrong number of features.")
-        evaluation_sample_minus_j = np.delete(evaluation_sample,feature_idx,axis=1)
-        return self.models[feature_idx].predict(evaluation_sample_minus_j)
+        X_eval = np.asarray(X_eval)
+        if X_eval.ndim != 2:
+            raise ValueError("X_eval must be a 2D array.")
+        if X_eval.shape[1] != self.feature_size:
+            raise ValueError("X_eval has the wrong number of features.")
+        X_eval_minus_j = np.delete(X_eval,feature_idx,axis=1)
+        return self.models[feature_idx].predict(X_eval_minus_j)
 
     def sample(self,*args,**kwargs):
         raise NotImplementedError("Sampling is not implemented for LOCO.")

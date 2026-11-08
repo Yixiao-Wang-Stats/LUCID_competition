@@ -1,234 +1,143 @@
 import numpy as np
 import torch
-from copy import deepcopy
-from sklearn.utils.validation import check_array, check_X_y
-from tabpfn.architectures.shared.bar_distribution import (
-    FullSupportBarDistribution,
-)
+
+from tabpfn.architectures.shared.bar_distribution import FullSupportBarDistribution
+from ..sampler import Sampler
 
 
-class TabPFNCDF:
-    """Batched native conditional CDF for local or hosted TabPFN."""
+class TabPFNSampler(Sampler):
+    """Conditional replacement sampling with local or hosted TabPFN."""
 
     def __init__(
-        self,
-        version="v2",
-        backend="local",
-        device="cuda",
-        batch_size=256,
-        cut_batch_size=256,
-        **model_kwargs,
+        self, version="v3.5", backend="local", device="auto",
+        batch_size=256, random_state=None, **model_kwargs,
     ):
-        if version not in {"v2", "v2.5", "v2.6", "v3", "v3.5"}:
-            raise ValueError("Unsupported TabPFN version.")
-
-        if backend not in {"local", "hosted"}:
-            raise ValueError("backend must be 'local' or 'hosted'.")
-
-        for size in (batch_size, cut_batch_size):
-            if not isinstance(size, (int, np.integer)) or size < 1:
-                raise ValueError("Batch sizes must be positive integers.")
-
+        super().__init__(random_state=random_state)
         self.version = version
         self.backend = backend
         self.device = device
         self.batch_size = batch_size
-        self.cut_batch_size = cut_batch_size
-        self.model_kwargs = model_kwargs
+        self.model_kwargs = dict(model_kwargs)
 
-    def fit(self, context, z):
-        context, z = check_X_y(context, z, y_numeric=True)
+    def fit(self, X_train, feature_idx, feature_type="continuous"):
+        X = np.asarray(X_train, dtype=float)
+        self.feature_idx = feature_idx
+        self.feature_type = feature_type
+        context = np.delete(X, feature_idx, axis=1)
+        target = X[:, feature_idx]
+        self._constant = None
 
-        options = dict(n_estimators="auto", random_state=2026)
+        if feature_type not in {"continuous", "binary", "categorical"}:
+            raise ValueError("Unknown feature type.")
+
+        categorical = feature_type != "continuous"
+        if categorical:
+            self.classes_, target = np.unique(target, return_inverse=True)
+            if len(self.classes_) == 1:
+                self._constant = self.classes_[0]
+                self.is_fitted = True
+                return self
+
+        options = {"random_state": self.random_state, **self.model_kwargs}
+        version = self.version
 
         if self.backend == "local":
-            from tabpfn import TabPFNRegressor
+            from tabpfn import TabPFNClassifier, TabPFNRegressor
             from tabpfn.constants import ModelVersion
 
-            options.update(
-                device=self.device,
-                fit_mode="fit_with_cache",  # is much helpful when you do many times of prediction
-                # n_preprocessing_jobs=2,
-                show_progress_bar=False,
-            )
-            options.update(self.model_kwargs)
+            version = ModelVersion(version)
+            options.setdefault("device", self.device)
+            options.setdefault("fit_mode", "fit_with_cache")
+            options.setdefault("show_progress_bar", False)
+        elif self.backend == "hosted":
+            from tabpfn_client import TabPFNClassifier, TabPFNRegressor
 
-            model = TabPFNRegressor.create_default_for_version(
-                ModelVersion(self.version),
-                **options,
+            options.setdefault(
+                "fit_mode",
+                "fit_preprocessors"
+                if self.version in {"v2.5", "v2.6"} else "fit_with_cache",
             )
-
+            options.setdefault("thinking_mode", False)
         else:
-            if self.version == "v2":
-                raise ValueError(
-                    "Use the local backend for v2 in this adapter."
-                )
+            raise ValueError("backend must be 'local' or 'hosted'.")
 
-            from tabpfn_client import TabPFNRegressor
-
-            options.update(
-                fit_mode=(
-                    "fit_preprocessors"
-                    if self.version in {"v2.5", "v2.6"}  # This is from hosted-API restriction.
-                    else "fit_with_cache"
-                ),
-                thinking_mode=False,
-            )
-            options.update(self.model_kwargs)
-
-            model = TabPFNRegressor.create_default_for_version(
-                self.version,
-                **options,
-            )
-
-        model.fit(context, z)
-
-        self.model_ = model
-        self.n_features_in_ = context.shape[1]
-
+        model_class = TabPFNClassifier if categorical else TabPFNRegressor
+        self.model_ = model_class.create_default_for_version(
+            version=version, **options
+        )
+        self.model_.fit(context, target)
+        self.is_fitted = True
         return self
 
-    @staticmethod
-    def _native_distribution(full):
-        """Normalize the native output without changing its distribution."""
+    def sample_batch(
+        self, X_eval, feature_indices,
+        n_resamples, X_reference=None,
+    ):
+        if not self.is_fitted:
+            raise RuntimeError("Call fit before sampling.")
+        if list(feature_indices) != [self.feature_idx]:
+            raise ValueError("Requested feature differs from fitted feature.")
 
-        logits = torch.as_tensor(
-            full["logits"]
-        ).detach().cpu().double()
+        X = np.asarray(X_eval, dtype=float)
+        context = np.delete(X, self.feature_idx, axis=1)
+        samples = np.empty((len(X), 1, n_resamples))
 
-        borders = (
-            full["criterion"].borders
-            if "criterion" in full
-            else full["borders"]
-        )
-        borders = torch.as_tensor(borders).detach().cpu().double()
+        if self._constant is not None:
+            samples.fill(self._constant)
+            return samples
 
-        if (
-            logits.ndim != 2
-            or borders.ndim != 1
-            or len(borders) != logits.shape[1] + 1
-        ):
-            raise ValueError("Unexpected native distribution dimensions.")
+        for start in range(0, len(X), self.batch_size):
+            stop = min(start + self.batch_size, len(X))
+            batch = context[start:stop]
 
-        if (
-            not torch.isfinite(borders).all()
-            or torch.any(torch.diff(borders) < 0)
-        ):
-            raise ValueError("Invalid native distribution borders.")
-
-        if (
-            torch.isnan(logits).any()
-            or torch.isposinf(logits).any()
-            or not torch.isfinite(logits).any(dim=1).all()
-        ):
-            raise ValueError("Invalid native distribution logits.")
-        widths = torch.diff(borders)
-
-        # The outer bins parameterize half-normal tails and need positive widths.
-        if widths[0] <= 0 or widths[-1] <= 0:
-            raise ValueError("Tail bins must have positive width.")
-
-        # Interior zero-width bins represent point masses. Keep them and their logits.
-        criterion = FullSupportBarDistribution(borders)
-
-        return criterion, logits
-
-
-        # empty = torch.diff(borders) == 0  # if the bin is empty, so tabpfn will treat it as point mass.
-
-        # if empty.any():
-        #     if (
-        #         empty[0]
-        #         or empty[-1]
-        #         or not torch.isneginf(logits[:, empty]).all()
-        #     ):
-        #         raise ValueError("Cannot remove a nonempty or tail bin.")
-
-        #     keep = ~empty
-        #     logits = logits[:, keep]
-        #     borders = torch.cat((borders[:-1][keep], borders[-1:]))
-
-        # criterion = FullSupportBarDistribution(borders) 
-
-        # return criterion, logits
-
-    def predict_cdf(self, context, cuts):
-        if not hasattr(self, "model_"):
-            raise RuntimeError("Call fit before predict_cdf.")
-
-        context = check_array(context)
-        cuts = np.asarray(cuts, dtype=np.float64)
-
-        if context.shape[1] != self.n_features_in_:
-            raise ValueError("context has the wrong number of features.")
-
-        if cuts.ndim != 1 or np.isnan(cuts).any():
-            raise ValueError("cuts must be a 1D array without NaN.")
-
-        result = np.empty((len(context), len(cuts)), dtype=np.float64)
-
-        if len(cuts) == 0:
-            return result
-
-        for row in range(0, len(context), self.batch_size):
-            batch = context[row:row + self.batch_size]  # row for evaluation
-
-            # One inference call per context batch, not per threshold.
-            full = self.model_.predict(batch, output_type="full")  # save all denstiy information
-            criterion, logits = self._native_distribution(full)  # the logits shape: (batch_size, n_bins)
-
-            if logits.shape[0] != len(batch):
-                raise ValueError("Prediction returned the wrong row count.")
-            # tabpfn will deal the zero bins as point masses.
-            # We should put that mass to the left side for CDF <= border.
-            borders = criterion.borders
-            zero_width = torch.diff(borders) == 0
-            atom_locations = borders[:-1][zero_width]
-
-            cumulative = None
-            if atom_locations.numel() > 0:
-                probabilities = torch.softmax(logits, dim=-1)
-                cumulative = torch.cat(
-                    (
-                        torch.zeros_like(probabilities[:, :1]),
-                        torch.cumsum(probabilities, dim=-1),
-                    ),
-                    dim=-1,
+            if self.feature_type != "continuous":
+                probabilities = np.asarray(self.model_.predict_proba(batch))
+                labels = np.asarray(self.model_.classes_, dtype=int)
+                classes = self.classes_[labels]
+                for row, p in enumerate(probabilities):
+                    samples[start + row, 0] = self.rng.choice(
+                        classes, size=n_resamples, p=p / p.sum()
+                    )
+            else:
+                full = self.model_.predict(batch, output_type="full")
+                logits = torch.as_tensor(full["logits"]).detach().cpu().double()
+                borders = (
+                    full["criterion"].borders
+                    if "criterion" in full else full["borders"]
+                )
+                borders = torch.as_tensor(borders).detach().cpu().double()
+                criterion = FullSupportBarDistribution(borders)
+                samples[start:stop, 0] = self._draw(
+                    criterion, logits, n_resamples
                 )
 
+        return samples  # (n_eval, n_selected_features, n_resamples)
 
-            with torch.inference_mode():
-                for column in range(0, len(cuts), self.cut_batch_size):
-                    thresholds = torch.as_tensor(
-                        cuts[column:column + self.cut_batch_size],
-                        dtype=logits.dtype,
-                    )
+    def sample(
+        self, x, feature_idx, n_resamples, X_reference=None,
+    ):
+        return self.sample_batch(
+            np.asarray(x)[None, :], [feature_idx],
+            n_resamples, X_reference,
+        )[0, 0]
 
-                    values = criterion.cdf(logits, thresholds)
-
-                    if cumulative is not None:
-                        at_atom = torch.isin(thresholds, atom_locations)
-
-                        if at_atom.any():
-                            # Count bins whose upper border is <= the requested threshold.
-                            counts = torch.searchsorted(
-                                borders[1:].contiguous(),
-                                thresholds[at_atom].contiguous(),
-                                right=True,
-                            )
-
-                            # Include all mass at equality: F(t) = P(Z <= t).
-                            values[:, at_atom] = cumulative[:, counts]
-
-                    values = values.numpy()
-
-
-                    result[
-                        row:row + len(batch),
-                        column:column + len(thresholds),
-                    ] = values
-
-        if not np.isfinite(result).all():
-            raise FloatingPointError("Nonfinite TabPFN CDF values.")
-
-        return np.clip(result, 0.0, 1.0)
+    def _draw(self, criterion, logits, count):
+        with torch.random.fork_rng(devices=[]), torch.inference_mode():
+            torch.manual_seed(self._next_r_seed())
+            bins = torch.multinomial(logits.softmax(-1), count, replacement=True)
+            widths = criterion.bucket_widths
+            values = (
+                criterion.borders[bins]
+                + widths[bins] * torch.rand(bins.shape, dtype=logits.dtype)
+            )
+            lower = criterion.borders[1] - (
+                criterion.halfnormal_with_p_weight_before(widths[0])
+                .sample(bins.shape)
+            )
+            upper = criterion.borders[-2] + (
+                criterion.halfnormal_with_p_weight_before(widths[-1])
+                .sample(bins.shape)
+            )
+            values = torch.where(bins == 0, lower, values)
+            values = torch.where(bins == logits.shape[-1] - 1, upper, values)
+            return values.numpy()

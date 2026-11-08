@@ -50,7 +50,7 @@ class CliqueSampler(Sampler):
         self,
         x,
         feature_idx,
-        replacement_sample_size,
+        n_resamples,
         X_reference:np.ndarray,
     ):
         if not self.is_fitted:
@@ -63,9 +63,9 @@ class CliqueSampler(Sampler):
                 "The sampler has not been fitted for this feature."
             )
 
-        if replacement_sample_size <= 0:
+        if n_resamples <= 0:
             raise ValueError(
-                "replacement_sample_size must be positive."
+                "n_resamples must be positive."
             )
 
         x = np.asarray(x)
@@ -84,9 +84,9 @@ class CliqueSampler(Sampler):
         probabilities = np.linspace(
             0.0,
             1.0,
-            num=replacement_sample_size,
+            num=n_resamples,
         )
-        replacement_samples = np.quantile(
+        replacement_values = np.quantile(
             training_feature,
             probabilities,
             method="linear",
@@ -95,17 +95,17 @@ class CliqueSampler(Sampler):
         if self.feature_types[feature_idx] != "continuous":
             categories = np.unique(training_feature)
             indices = np.abs(
-                replacement_samples[:, None]-categories[None, :]
+                replacement_values[:, None]-categories[None, :]
             ).argmin(axis=1)
-            replacement_samples = categories[indices]
+            replacement_values = categories[indices]
 
-        return replacement_samples
+        return replacement_values
 
     def sample_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         if not self.is_fitted:
@@ -113,16 +113,16 @@ class CliqueSampler(Sampler):
                 "Sampler must be fitted before sampling."
             )
 
-        evaluation_sample = np.asarray(evaluation_sample)
+        X_eval = np.asarray(X_eval)
 
-        if evaluation_sample.ndim != 2:
+        if X_eval.ndim != 2:
             raise ValueError(
-                "evaluation_sample must be a 2D array."
+                "X_eval must be a 2D array."
             )
 
-        if evaluation_sample.shape[1] != self.feature_size:
+        if X_eval.shape[1] != self.feature_size:
             raise ValueError(
-                "evaluation_sample has the wrong number of features."
+                "X_eval has the wrong number of features."
             )
 
         feature_indices = np.asarray(feature_indices)
@@ -132,19 +132,19 @@ class CliqueSampler(Sampler):
                 "feature_indices must be a 1D array."
             )
 
-        if replacement_sample_size <= 0:
+        if n_resamples <= 0:
             raise ValueError(
-                "replacement_sample_size must be positive."
+                "n_resamples must be positive."
             )
 
-        evaluation_sample_size = evaluation_sample.shape[0]
+        n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
 
         samples = np.empty(
             (
-                evaluation_sample_size,
+                n_eval,
                 selected_feature_size,
-                replacement_sample_size,
+                n_resamples,
             )
         )
 
@@ -158,9 +158,9 @@ class CliqueSampler(Sampler):
             probabilities = np.linspace(
                 0.0,
                 1.0,
-                num=replacement_sample_size,
+                num=n_resamples,
             )
-            replacement_samples = np.quantile(
+            replacement_values = np.quantile(
                 training_feature,
                 probabilities,
                 method="linear",
@@ -169,12 +169,12 @@ class CliqueSampler(Sampler):
             if self.feature_types[feature_idx] != "continuous":
                 categories, counts = np.unique(training_feature, return_counts=True)
                 category_counts = np.round(
-                    replacement_sample_size * counts / len(training_feature)
+                    n_resamples * counts / len(training_feature)
                 ).astype(int)
-                difference = replacement_sample_size - category_counts.sum()
+                difference = n_resamples - category_counts.sum()
                 category_counts[np.argmax(counts)] += difference  # make sure the total number equals the replacement samples.
-                replacement_samples = np.repeat(categories, category_counts)
+                replacement_values = np.repeat(categories, category_counts)
 
-            samples[:, local_j, :] = replacement_samples[None, :]
+            samples[:, local_j, :] = replacement_values[None, :]
 
         return samples

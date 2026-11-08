@@ -26,11 +26,11 @@ class OptimalLUCIDSampler(Sampler):
     def sample(self, *args, **kwargs):
         raise NotImplementedError("Optimal LUCID uses calculate_batch, without sampling.")
 
-    def calculate_batch(self, evaluation_sample, evaluation_target, feature_idx,
+    def calculate_batch(self, X_eval, evaluation_target, feature_idx,
                         loss_type="l2"):
         if loss_type not in {"l2", "mse", "squared_error"}:
             raise ValueError("Analytic optimal LUCID supports only L2 loss.")
-        X = np.asarray(evaluation_sample, dtype=float)
+        X = np.asarray(X_eval, dtype=float)
         y = np.asarray(evaluation_target, dtype=float)
         if X.ndim != 2 or y.shape != (len(X),):
             raise ValueError("Expected a 2D evaluation sample and one target per row.")
@@ -56,10 +56,10 @@ class OptimalLOCOSampler(Sampler):
             raise ValueError("No known reduced model for this feature.")
         return self
 
-    def predict_batch(self, evaluation_sample, feature_idx):
-        X = np.asarray(evaluation_sample, dtype=float)
+    def predict_batch(self, X_eval, feature_idx):
+        X = np.asarray(X_eval, dtype=float)
         if X.ndim != 2:
-            raise ValueError("evaluation_sample must be a 2D array.")
+            raise ValueError("X_eval must be a 2D array.")
         if not isinstance(feature_idx, (int, np.integer)) or not 0 <= feature_idx < X.shape[1]:
             raise ValueError("feature_idx is out of range.")
         if feature_idx not in self.models:

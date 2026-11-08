@@ -4,7 +4,7 @@ from scipy.stats import norm
 
 from ..sampler import Sampler
 
-#  We first write two helper functions from evaluation_samples to Gaussian copula.
+#  We first write two helper functions from X_eval to Gaussian copula.
 
 def _to_gaussian_with_empirical_distribution_reference(sample, empirical_distribution_reference_sample,):
     # Since we don't have true CDF, we can only use empirical distribution
@@ -93,7 +93,7 @@ class GCMRSampler(Sampler):
 
         return self
     
-    def sample(self, x, feature_idx, replacement_sample_size, X_reference:np.ndarray):
+    def sample(self, x, feature_idx, n_resamples, X_reference:np.ndarray):
         if not self.is_fitted:
             raise RuntimeError(
                 "Sampler must be fitted before sampling."
@@ -104,9 +104,9 @@ class GCMRSampler(Sampler):
                 "The sampler has not been fitted for this feature."
             )
 
-        if replacement_sample_size <= 0:
+        if n_resamples <= 0:
             raise ValueError(
-                "replacement_sample_size must be positive."
+                "n_resamples must be positive."
             )
 
         x = np.asarray(x)
@@ -156,20 +156,20 @@ class GCMRSampler(Sampler):
         Z_reference_minus_j = np.delete(Z_reference, feature_idx, axis=1)
         conditional_mean_reference = model.predict(Z_reference_minus_j)
         reference_residuals = (Z_reference[:, feature_idx] - conditional_mean_reference)
-        sampled_residuals = self.rng.choice(reference_residuals,size=replacement_sample_size,replace=True,)
-        replacement_samples_gaussian = (conditional_mean_z + sampled_residuals)
-        replacement_samples = _from_gaussian_with_empirical_distribution_reference(
-            replacement_samples_gaussian,
+        sampled_residuals = self.rng.choice(reference_residuals,size=n_resamples,replace=True,)
+        replacement_values_gaussian = (conditional_mean_z + sampled_residuals)
+        replacement_values = _from_gaussian_with_empirical_distribution_reference(
+            replacement_values_gaussian,
             self.X_train[:, feature_idx],
         )
-        return replacement_samples
+        return replacement_values
 
     # rewrite sample batch, since for each batch we do not want predict for each samples!
     def sample_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         if not self.is_fitted:
@@ -178,17 +178,17 @@ class GCMRSampler(Sampler):
             )
 
 
-        evaluation_sample = np.asarray(evaluation_sample)
+        X_eval = np.asarray(X_eval)
 
-        if evaluation_sample.ndim != 2:
+        if X_eval.ndim != 2:
             raise ValueError(
-                "evaluation_sample must be a 2D array."
+                "X_eval must be a 2D array."
             )
 
 
-        if evaluation_sample.shape[1] != self.feature_size:
+        if X_eval.shape[1] != self.feature_size:
             raise ValueError(
-                "evaluation_sample has the wrong number of features."
+                "X_eval has the wrong number of features."
             )
 
 
@@ -200,9 +200,9 @@ class GCMRSampler(Sampler):
             )
 
 
-        if replacement_sample_size <= 0:
+        if n_resamples <= 0:
             raise ValueError(
-                "replacement_sample_size must be positive."
+                "n_resamples must be positive."
             )
 
 
@@ -220,18 +220,18 @@ class GCMRSampler(Sampler):
             )
 
 
-        evaluation_sample_size = evaluation_sample.shape[0]
+        n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
         samples = np.empty(
-                (evaluation_sample_size, selected_feature_size, replacement_sample_size)
+                (n_eval, selected_feature_size, n_resamples)
             )
         # transform evaluation sample to Gaussian space
-        gaussian_evaluation_sample = np.empty_like(evaluation_sample,dtype=float)
+        gaussian_X_eval = np.empty_like(X_eval,dtype=float)
         # transform reference sample to Gaussian space
         gaussian_X_reference = np.empty_like(X_reference,dtype=float)
         for j in range(self.feature_size):
-            gaussian_evaluation_sample[:, j] = _to_gaussian_with_empirical_distribution_reference(
-                evaluation_sample[:, j],
+            gaussian_X_eval[:, j] = _to_gaussian_with_empirical_distribution_reference(
+                X_eval[:, j],
                 self.X_train[:, j],
             )
 
@@ -250,20 +250,20 @@ class GCMRSampler(Sampler):
             model = self.models[feature_idx]
             
             # predict conditional mean for the whole evaluation batch
-            gaussian_evaluation_sample_minus_j = np.delete(gaussian_evaluation_sample,feature_idx,axis=1,)
-            conditional_mean_evaluation = model.predict(gaussian_evaluation_sample_minus_j)  # shape (evaluation_sample_size,)
+            gaussian_X_eval_minus_j = np.delete(gaussian_X_eval,feature_idx,axis=1,)
+            conditional_mean_evaluation = model.predict(gaussian_X_eval_minus_j)  # shape (n_eval,)
             # calculate residual pool on the reference dataset
-            gaussian_X_reference_minus_j = np.delete(gaussian_X_reference, feature_idx, axis=1)  # shape (evaluation_sample_size, feature_size-1)
-            conditional_mean_reference = model.predict(gaussian_X_reference_minus_j)  # shape (evaluation_sample_size,)
+            gaussian_X_reference_minus_j = np.delete(gaussian_X_reference, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
+            conditional_mean_reference = model.predict(gaussian_X_reference_minus_j)  # shape (n_eval,)
             reference_residuals = gaussian_X_reference[:, feature_idx]-conditional_mean_reference
-            sampled_residuals = self.rng.choice(reference_residuals,size=(evaluation_sample_size,replacement_sample_size,),replace=True,)  # shape (evaluation_sample_size, replacement_sample_size)
+            sampled_residuals = self.rng.choice(reference_residuals,size=(n_eval,n_resamples,),replace=True,)  # shape (n_eval, n_resamples)
 
-            gaussian_replacement_samples = (conditional_mean_evaluation[:, None]+ sampled_residuals) # shape (evaluation_sample_size, replacement_sample_size)
-            replacement_samples = _from_gaussian_with_empirical_distribution_reference(
-                gaussian_replacement_samples,
+            gaussian_replacement_values = (conditional_mean_evaluation[:, None]+ sampled_residuals) # shape (n_eval, n_resamples)
+            replacement_values = _from_gaussian_with_empirical_distribution_reference(
+                gaussian_replacement_values,
                 self.X_train[:, feature_idx],
             )
 
-            samples[:, local_j, :] = replacement_samples
+            samples[:, local_j, :] = replacement_values
 
         return samples

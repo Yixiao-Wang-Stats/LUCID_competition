@@ -3,7 +3,7 @@
 #     fitted psi
 #     x
 #     feature_idx
-#     replacement_sample_size
+#     n_resamples
 #
 # output:
 #     replacement samples
@@ -23,11 +23,11 @@ sample_arf <- function(
     psi,
     x,
     feature_idx,
-    replacement_sample_size,
+    n_resamples,
     schema
 ) {
     x <- as.matrix(x)
-    evaluation_sample_size <- nrow(x)
+    n_eval <- nrow(x)
     feature_size <- ncol(x)
 
     if (feature_idx < 0L || feature_idx >= feature_size) {
@@ -67,7 +67,7 @@ sample_arf <- function(
     # generate replacement samples
     synthetic <- arf::forge(
         params = psi,
-        n_synth = replacement_sample_size,
+        n_synth = n_resamples,
         evidence = evidence,
         evidence_row_mode = "separate"
     )
@@ -80,8 +80,8 @@ sample_arf <- function(
 
     matrix(
         replacement,
-        nrow = evaluation_sample_size,
-        ncol = replacement_sample_size,
+        nrow = n_eval,
+        ncol = n_resamples,
         byrow = TRUE
     )
 }
@@ -97,11 +97,11 @@ fit_dir <- args[[1L]]
 input_file <- args[[2L]]
 output_file <- args[[3L]]
 feature_idx <- as.integer(args[[4L]])
-replacement_sample_size <- as.integer(args[[5L]])
+n_resamples <- as.integer(args[[5L]])
 seed <- as.integer(args[[6L]])
 
-if (replacement_sample_size <= 0) {
-    stop("replacement_sample_size must be positive.")
+if (n_resamples <= 0) {
+    stop("n_resamples must be positive.")
 }
 
 x <- as.matrix(read.csv(input_file,header = FALSE))
@@ -114,7 +114,7 @@ replacement <- sample_arf(
     psi = psi,
     x = x,
     feature_idx = feature_idx,
-    replacement_sample_size = replacement_sample_size,
+    n_resamples = n_resamples,
     schema = schema
 )
 

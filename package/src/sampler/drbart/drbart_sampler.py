@@ -25,7 +25,7 @@ class DRBartSampler(Sampler):
     ):
         super().__init__(random_state=random_state)
         self.output_dir = Path(output_dir)
-        self.exchange_dir = Path(os.environ.get("LUCID_EXCHANGE_DIR", "results/tmp"))
+        self.exchange_dir = self.output_dir / "exchange"
         self.exchange_dir.mkdir(parents=True, exist_ok=True)  # just use to avoid conflicts when running in parallel
         self.seed = seed
         self.nburn = nburn
@@ -150,13 +150,13 @@ class DRBartSampler(Sampler):
         return self
 
 
-    def sample(self, x, feature_idx, replacement_sample_size, X_reference=None):
+    def sample(self, x, feature_idx, n_resamples, X_reference=None):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
         if feature_idx not in self.fits:
             raise RuntimeError("The sampler has not been fitted for this feature.")
-        if replacement_sample_size <= 0:
-            raise ValueError("replacement_sample_size must be positive.")
+        if n_resamples <= 0:
+            raise ValueError("n_resamples must be positive.")
         x = np.asarray(x)
         if x.ndim != 1:
             raise ValueError("x must be a 1D feature vector.")
@@ -169,7 +169,7 @@ class DRBartSampler(Sampler):
             return self.bart_sampler.sample(
                 x=x,
                 feature_idx=feature_idx,
-                replacement_sample_size=replacement_sample_size,
+                n_resamples=n_resamples,
                 X_reference=X_reference,
             )
         
@@ -178,17 +178,17 @@ class DRBartSampler(Sampler):
         return self._sample_from_r(
             x_minus_j=x_minus_j,
             fit_dir=fit_dir,
-            replacement_sample_size=replacement_sample_size,
+            n_resamples=n_resamples,
             mode="lucid"
         )
 
-    def sample_posterior_credible_interval(self, x, feature_idx, replacement_sample_size, posterior_id):
+    def sample_posterior_credible_interval(self, x, feature_idx, n_resamples, posterior_id):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
         if feature_idx not in self.fits:
             raise RuntimeError("The sampler has not been fitted for this feature.")
-        if replacement_sample_size <= 0:
-            raise ValueError("replacement_sample_size must be positive.")
+        if n_resamples <= 0:
+            raise ValueError("n_resamples must be positive.")
         if posterior_id <= 0:
             raise ValueError("posterior_id must be positive.")
         x = np.asarray(x)
@@ -203,7 +203,7 @@ class DRBartSampler(Sampler):
             return self.bart_sampler.sample_posterior_credible_interval(
                 x=x,
                 feature_idx=feature_idx,
-                replacement_sample_size=replacement_sample_size,
+                n_resamples=n_resamples,
                 posterior_id=posterior_id,
             )
 
@@ -212,13 +212,13 @@ class DRBartSampler(Sampler):
         return self._sample_from_r(
             x_minus_j=x_minus_j,
             fit_dir=fit_dir,
-            replacement_sample_size=replacement_sample_size,
+            n_resamples=n_resamples,
             mode="credible_interval",
             posterior_id=posterior_id
         )
 
     # sample function from R
-    def _sample_from_r(self, x_minus_j, fit_dir, replacement_sample_size, mode, posterior_id=None):
+    def _sample_from_r(self, x_minus_j, fit_dir, n_resamples, mode, posterior_id=None):
         if mode not in {"lucid", "credible_interval"}:
             raise ValueError("mode must be either 'lucid' or 'credible_interval'.")
         if mode == "credible_interval" and posterior_id is None:
@@ -244,7 +244,7 @@ class DRBartSampler(Sampler):
             str(fit_dir),
             str(input_file),
             str(output_file),
-            str(replacement_sample_size),
+            str(n_resamples),
             str(mode),
             str(self._next_r_seed()),
         ]
@@ -254,34 +254,34 @@ class DRBartSampler(Sampler):
         command.extend(self._bounds_arguments(fit_dir))
         subprocess.run(command,check=True,)
 
-        replacement_samples = np.loadtxt(output_file,delimiter=",",)
-        replacement_samples = np.asarray(replacement_samples).reshape(-1)
-        return replacement_samples
+        replacement_values = np.loadtxt(output_file,delimiter=",",)
+        replacement_values = np.asarray(replacement_values).reshape(-1)
+        return replacement_values
 
     # sample_batch
     def sample_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
-        evaluation_sample = np.asarray(evaluation_sample)
-        if evaluation_sample.ndim != 2:
-            raise ValueError("evaluation_sample must be a 2D array.")
-        if evaluation_sample.shape[1] != self.feature_size:
-            raise ValueError("evaluation_sample has the wrong number of features.")
+        X_eval = np.asarray(X_eval)
+        if X_eval.ndim != 2:
+            raise ValueError("X_eval must be a 2D array.")
+        if X_eval.shape[1] != self.feature_size:
+            raise ValueError("X_eval has the wrong number of features.")
         feature_indices = np.asarray(feature_indices)
         if feature_indices.ndim != 1:
             raise ValueError("feature_indices must be a 1D array.")
-        if replacement_sample_size <= 0:
-            raise ValueError("replacement_sample_size must be positive.")
-        evaluation_sample_size = evaluation_sample.shape[0]
+        if n_resamples <= 0:
+            raise ValueError("n_resamples must be positive.")
+        n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
         samples = np.empty(
-            (evaluation_sample_size, selected_feature_size, replacement_sample_size)
+            (n_eval, selected_feature_size, n_resamples)
         )
         for local_j,feature_idx in enumerate(feature_indices):
             if feature_idx not in self.fits:
@@ -290,53 +290,53 @@ class DRBartSampler(Sampler):
             feature_type = self.feature_types[feature_idx]
 
             if feature_type in {"binary","categorical"}:
-                replacement_samples = self.bart_sampler.sample_batch(
-                    evaluation_sample=evaluation_sample,
+                replacement_values = self.bart_sampler.sample_batch(
+                    X_eval=X_eval,
                     feature_indices=np.array([feature_idx]),
-                    replacement_sample_size=replacement_sample_size,
+                    n_resamples=n_resamples,
                     X_reference=X_reference,
                 )
-                samples[:,local_j,:] = replacement_samples[:,0,:]
+                samples[:,local_j,:] = replacement_values[:,0,:]
                 continue
 
-            evaluation_sample_minus_j = np.delete(evaluation_sample,feature_idx,axis=1)
+            X_eval_minus_j = np.delete(X_eval,feature_idx,axis=1)
             fit_dir = self.fits[feature_idx]
-            replacement_samples = self._sample_batch_from_r(
-                evaluation_sample_minus_j=evaluation_sample_minus_j,
+            replacement_values = self._sample_batch_from_r(
+                X_eval_minus_j=X_eval_minus_j,
                 fit_dir=fit_dir,
-                replacement_sample_size=replacement_sample_size,
+                n_resamples=n_resamples,
                 mode="lucid"
             )
-            samples[:,local_j,:] = replacement_samples
+            samples[:,local_j,:] = replacement_values
         return samples
 
 
     def sample_batch_posterior_credible_interval(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         posterior_id,
         X_reference=None,
     ):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
-        evaluation_sample = np.asarray(evaluation_sample)
-        if evaluation_sample.ndim != 2:
-            raise ValueError("evaluation_sample must be a 2D array.")
-        if evaluation_sample.shape[1] != self.feature_size:
-            raise ValueError("evaluation_sample has the wrong number of features.")
+        X_eval = np.asarray(X_eval)
+        if X_eval.ndim != 2:
+            raise ValueError("X_eval must be a 2D array.")
+        if X_eval.shape[1] != self.feature_size:
+            raise ValueError("X_eval has the wrong number of features.")
         feature_indices = np.asarray(feature_indices)
         if feature_indices.ndim != 1:
             raise ValueError("feature_indices must be a 1D array.")
-        if replacement_sample_size <= 0:
-            raise ValueError("replacement_sample_size must be positive.")
+        if n_resamples <= 0:
+            raise ValueError("n_resamples must be positive.")
         if posterior_id <= 0:
             raise ValueError("posterior_id must be positive.")
-        evaluation_sample_size = evaluation_sample.shape[0]
+        n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
         samples = np.empty(
-            (evaluation_sample_size, selected_feature_size, replacement_sample_size)
+            (n_eval, selected_feature_size, n_resamples)
         )
        
         for local_j,feature_idx in enumerate(feature_indices):
@@ -346,34 +346,34 @@ class DRBartSampler(Sampler):
             feature_type = self.feature_types[feature_idx]
 
             if feature_type in {"binary","categorical"}:
-                replacement_samples = self.bart_sampler.sample_batch_posterior_credible_interval(
-                    evaluation_sample=evaluation_sample,
+                replacement_values = self.bart_sampler.sample_batch_posterior_credible_interval(
+                    X_eval=X_eval,
                     feature_indices=np.array([feature_idx]),
-                    replacement_sample_size=replacement_sample_size,
+                    n_resamples=n_resamples,
                     posterior_id=posterior_id,
                     X_reference=X_reference,
                 )
-                samples[:,local_j,:] = replacement_samples[:,0,:]
+                samples[:,local_j,:] = replacement_values[:,0,:]
                 continue
 
-            evaluation_sample_minus_j = np.delete(evaluation_sample,feature_idx,axis=1)
+            X_eval_minus_j = np.delete(X_eval,feature_idx,axis=1)
             fit_dir = self.fits[feature_idx]
-            replacement_samples = self._sample_batch_from_r(
-                evaluation_sample_minus_j=evaluation_sample_minus_j,
+            replacement_values = self._sample_batch_from_r(
+                X_eval_minus_j=X_eval_minus_j,
                 fit_dir=fit_dir,
-                replacement_sample_size=replacement_sample_size,
+                n_resamples=n_resamples,
                 mode="credible_interval",
                 posterior_id=posterior_id
             )
-            samples[:,local_j,:] = replacement_samples
+            samples[:,local_j,:] = replacement_values
         return samples
 
 
     def _sample_batch_from_r(
         self,
-        evaluation_sample_minus_j,
+        X_eval_minus_j,
         fit_dir,
-        replacement_sample_size,
+        n_resamples,
         mode,
         posterior_id=None,
     ):
@@ -381,19 +381,19 @@ class DRBartSampler(Sampler):
             raise ValueError("mode must be either 'lucid' or 'credible_interval'.")
         if mode == "credible_interval" and posterior_id is None:
             raise ValueError("posterior_id is required for credible_interval mode.")
-        evaluation_sample_minus_j = np.asarray(evaluation_sample_minus_j)
-        if evaluation_sample_minus_j.ndim != 2:
+        X_eval_minus_j = np.asarray(X_eval_minus_j)
+        if X_eval_minus_j.ndim != 2:
             raise ValueError(
-                "evaluation_sample_minus_j must be a 2D array."
+                "X_eval_minus_j must be a 2D array."
             )
-        evaluation_sample_size = evaluation_sample_minus_j.shape[0]
+        n_eval = X_eval_minus_j.shape[0]
 
 
         temporary_dir = Path(tempfile.mkdtemp(dir=self.exchange_dir))
 
         input_file = temporary_dir / "evaluation_sample.csv"
         output_file = temporary_dir / "replacement_samples.csv"
-        np.savetxt(input_file, evaluation_sample_minus_j, delimiter=",")
+        np.savetxt(input_file, X_eval_minus_j, delimiter=",")
         script_path = Path(__file__).with_name("drbart_sample.R")
         command = [
             "Rscript",
@@ -401,7 +401,7 @@ class DRBartSampler(Sampler):
             str(fit_dir),
             str(input_file),
             str(output_file),
-            str(replacement_sample_size),
+            str(n_resamples),
             str(mode),
             str(self._next_r_seed()),
         ]
@@ -409,12 +409,12 @@ class DRBartSampler(Sampler):
             command.append(str(posterior_id))
         command.extend(self._bounds_arguments(fit_dir))
         subprocess.run(command, check=True)
-        replacement_samples = np.loadtxt(output_file, delimiter=",")
-        replacement_samples = np.asarray(replacement_samples)
-        if replacement_samples.ndim == 1:
-            replacement_samples = replacement_samples.reshape(1, -1)
+        replacement_values = np.loadtxt(output_file, delimiter=",")
+        replacement_values = np.asarray(replacement_values)
+        if replacement_values.ndim == 1:
+            replacement_values = replacement_values.reshape(1, -1)
         
-        return replacement_samples
+        return replacement_values
 
 
     # helper function for seed in order to make sure every call produces a different seed

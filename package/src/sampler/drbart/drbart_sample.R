@@ -87,7 +87,7 @@ truncated_distribution_sampler <- function(fit,mean_trees,prec_trees,x,posterior
     # = \sum_{k} f_k(z | z\in bounds) * w_k^*
     # = \sum_{k} w_k^*  *  f_k(z | z\in bounds) 
 
-    x <- as.matrix(x)  # shape (replacement_sample_size, 1)
+    x <- as.matrix(x)  # shape (n_resamples, 1)
     if (length(bounds) != 2L || any(!is.finite(bounds)) || bounds[1L] >= bounds[2L]) {
         stop("Truncated distribution requires finite increasing bounds.")
     }
@@ -187,12 +187,12 @@ sample_given_single_posterior <- function(
     prec_trees,
     x,
     posterior_id,
-    replacement_sample_size
+    n_resamples
 ) {
     # First, we get the posterior_id
     x <- as.matrix(x)
-    # x_repeat <- x[rep(1:nrow(x), each = replacement_sample_size), , drop = FALSE]  # sample x with replacement for replacement_sample_size times
-    x_repeat <- x[rep(seq_len(nrow(x)), each = replacement_sample_size), , drop = FALSE]
+    # x_repeat <- x[rep(1:nrow(x), each = n_resamples), , drop = FALSE]  # sample x with replacement for n_resamples times
+    x_repeat <- x[rep(seq_len(nrow(x)), each = n_resamples), , drop = FALSE]
     replacement <- numeric(nrow(x_repeat))
     pending <- seq_len(nrow(x_repeat))
     # try fit 10000 times 
@@ -222,24 +222,24 @@ sample_posterior_for_lucid <- function(
     mean_trees,
     prec_trees,
     x,
-    replacement_sample_size
+    n_resamples
 ) {
     posterior_count <- length(fit$fit$ucuts)
     # posterior_ids <- sample.int(
     #     posterior_count,
-    #     replacement_sample_size,
+    #     n_resamples,
     #     replace = TRUE
     # )
-    # replacement <- numeric(replacement_sample_size)
-    evaluation_sample_size <- nrow(x)
-    total_sample_size <- evaluation_sample_size * replacement_sample_size
+    # replacement <- numeric(n_resamples)
+    n_eval <- nrow(x)
+    total_sample_size <- n_eval * n_resamples
     posterior_ids <- sample.int(
         posterior_count,
         total_sample_size,
         replace = TRUE
     )
     replacement <- numeric(total_sample_size)
-    x_repeat <- x[rep(seq_len(evaluation_sample_size), each = replacement_sample_size), , drop = FALSE]
+    x_repeat <- x[rep(seq_len(n_eval), each = n_resamples), , drop = FALSE]
     for (posterior_id in unique(posterior_ids)) {
         positions <- which(posterior_ids == posterior_id)
         current_replacement <- sample_given_single_posterior(
@@ -248,14 +248,14 @@ sample_posterior_for_lucid <- function(
             prec_trees = prec_trees,
             x = x_repeat[positions, , drop = FALSE],
             posterior_id = posterior_id,
-            replacement_sample_size = 1
+            n_resamples = 1
         )
         replacement[positions] <- current_replacement
     }
     matrix(
         replacement,
-        nrow = evaluation_sample_size,
-        ncol = replacement_sample_size,
+        nrow = n_eval,
+        ncol = n_resamples,
         byrow = TRUE
     )
 }
@@ -267,21 +267,21 @@ sample_fixed_posterior_for_credible_interval <- function(
     prec_trees,
     x,
     posterior_id,
-    replacement_sample_size
+    n_resamples
 ) {
-    evaluation_sample_size <- nrow(x)
+    n_eval <- nrow(x)
     replacement <- sample_given_single_posterior(
         fit = fit,
         mean_trees = mean_trees,
         prec_trees = prec_trees,
         x = x,
         posterior_id = posterior_id,
-        replacement_sample_size = replacement_sample_size
+        n_resamples = n_resamples
     )
     matrix(
         replacement,
-        nrow = evaluation_sample_size,
-        ncol = replacement_sample_size,
+        nrow = n_eval,
+        ncol = n_resamples,
         byrow = TRUE
     )
 }
@@ -297,7 +297,7 @@ if (!length(args) %in% c(6L, 7L, 9L, 10L)) {
 fit_dir <- args[[1L]]
 input_file <- args[[2L]]
 output_file <- args[[3L]]
-replacement_sample_size <- as.integer(args[[4L]])
+n_resamples <- as.integer(args[[4L]])
 mode <- args[[5L]]
 seed <- as.integer(args[[6L]])
 
@@ -305,8 +305,8 @@ if (!mode %in% c("lucid", "credible_interval")) {
     stop("mode must be either 'lucid' or 'credible_interval'.")
 }
 
-if (replacement_sample_size <= 0) {
-    stop("replacement_sample_size must be positive.")
+if (n_resamples <= 0) {
+    stop("n_resamples must be positive.")
 }
 
 base_args <- if (mode == "credible_interval") 7L else 6L
@@ -329,7 +329,7 @@ if (mode == "lucid") {
         mean_trees = trees$mean,
         prec_trees = trees$prec,
         x = x,
-        replacement_sample_size = replacement_sample_size
+        n_resamples = n_resamples
     )
 } else {
     posterior_id <- as.integer(args[[7L]])
@@ -343,7 +343,7 @@ if (mode == "lucid") {
         prec_trees = trees$prec,
         x = x,
         posterior_id = posterior_id,
-        replacement_sample_size = replacement_sample_size
+        n_resamples = n_resamples
     )
 }
 
@@ -394,7 +394,7 @@ write.table(
 #     prec_trees = trees$prec,
 #     x = x,
 #     posterior_id = 1,
-#     replacement_sample_size = 10
+#     n_resamples = 10
 # )
 
 # print(replacement)
@@ -405,7 +405,7 @@ write.table(
 #     mean_trees = trees$mean,
 #     prec_trees = trees$prec,
 #     x = x,
-#     replacement_sample_size = 10
+#     n_resamples = 10
 # )
 
 # print(replacement_marginal)
@@ -417,7 +417,7 @@ write.table(
 #     prec_trees = trees$prec,
 #     x = x,
 #     posterior_id = 1,
-#     replacement_sample_size = 10
+#     n_resamples = 10
 # )
 
 # print(replacement_fixed)

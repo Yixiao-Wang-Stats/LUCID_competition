@@ -11,14 +11,14 @@ from ..sampler import Sampler
 class ARFSampler(Sampler):
     def __init__(
         self,
+        output_dir,
         random_state=None,
-        output_dir=None,
         feature_types=None,
     ):
         super().__init__(random_state=random_state)
 
-        self.output_dir = Path(output_dir) if output_dir is not None else None
-        self.exchange_dir = Path(os.environ.get("LUCID_EXCHANGE_DIR", "results/tmp"))
+        self.output_dir = Path(output_dir)
+        self.exchange_dir = self.output_dir / "exchange"
         self.exchange_dir.mkdir(parents=True, exist_ok=True)
         self.fit_dir = None
         self.feature_size = None
@@ -116,7 +116,7 @@ class ARFSampler(Sampler):
         self,
         x,
         feature_idx,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         if self.fit_dir is None:
@@ -144,9 +144,9 @@ class ARFSampler(Sampler):
                 "feature_idx is out of range."
             )
 
-        if replacement_sample_size <= 0:
+        if n_resamples <= 0:
             raise ValueError(
-                "replacement_sample_size must be positive."
+                "n_resamples must be positive."
             )
         
         if feature_idx not in self.fits:
@@ -160,10 +160,10 @@ class ARFSampler(Sampler):
             x=x,
             feature_idx=feature_idx,
             fit_dir=fit_dir,
-            replacement_sample_size=replacement_sample_size,
+            n_resamples=n_resamples,
         )
 
-        if replacement.shape[0] != replacement_sample_size:
+        if replacement.shape[0] != n_resamples:
             raise RuntimeError(
                 "ARF returned unexpected number of samples."
             )
@@ -175,7 +175,7 @@ class ARFSampler(Sampler):
         x,
         feature_idx,
         fit_dir,
-        replacement_sample_size,
+        n_resamples,
     ):
         script_file = Path(__file__).with_name("arf_sample.R")
         seed = int(self.rng.integers(0,np.iinfo(np.int32).max,))
@@ -196,7 +196,7 @@ class ARFSampler(Sampler):
             str(input_file),
             str(output_file),
             str(feature_idx),
-            str(replacement_sample_size),
+            str(n_resamples),
             str(seed),
         ]
 
@@ -213,9 +213,9 @@ class ARFSampler(Sampler):
 
     def sample_batch(
         self,
-        evaluation_sample,
+        X_eval,
         feature_indices,
-        replacement_sample_size,
+        n_resamples,
         X_reference=None,
     ):
         if not self.is_fitted:
@@ -223,16 +223,16 @@ class ARFSampler(Sampler):
                 "Sampler must be fitted before sampling."
             )
 
-        evaluation_sample = np.asarray(evaluation_sample)
+        X_eval = np.asarray(X_eval)
 
-        if evaluation_sample.ndim != 2:
+        if X_eval.ndim != 2:
             raise ValueError(
-                "evaluation_sample must be a 2D array."
+                "X_eval must be a 2D array."
             )
 
-        if evaluation_sample.shape[1] != self.feature_size:
+        if X_eval.shape[1] != self.feature_size:
             raise ValueError(
-                "evaluation_sample has the wrong number of features."
+                "X_eval has the wrong number of features."
             )
 
         feature_indices = np.asarray(feature_indices,dtype=int,)
@@ -242,19 +242,19 @@ class ARFSampler(Sampler):
                 "feature_indices must be a 1D array."
             )
 
-        if replacement_sample_size <= 0:
+        if n_resamples <= 0:
             raise ValueError(
-                "replacement_sample_size must be positive."
+                "n_resamples must be positive."
             )
 
-        evaluation_sample_size = evaluation_sample.shape[0]
+        n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
 
         samples = np.empty(
             (
-                evaluation_sample_size,
+                n_eval,
                 selected_feature_size,
-                replacement_sample_size,
+                n_resamples,
             )
         )
 
@@ -267,33 +267,33 @@ class ARFSampler(Sampler):
 
             fit_dir = self.fits[feature_idx]
 
-            replacement_samples = self._sample_batch_from_r(
-                evaluation_sample=evaluation_sample,
+            replacement_values = self._sample_batch_from_r(
+                X_eval=X_eval,
                 feature_idx=feature_idx,
                 fit_dir=fit_dir,
-                replacement_sample_size=replacement_sample_size,
+                n_resamples=n_resamples,
             )
 
-            samples[:, local_j, :] = replacement_samples
+            samples[:, local_j, :] = replacement_values
 
         return samples
     
 
     def _sample_batch_from_r(
         self,
-        evaluation_sample,
+        X_eval,
         feature_idx,
         fit_dir,
-        replacement_sample_size,
+        n_resamples,
     ):
-        evaluation_sample = np.asarray(evaluation_sample)
+        X_eval = np.asarray(X_eval)
 
-        if evaluation_sample.ndim != 2:
+        if X_eval.ndim != 2:
             raise ValueError(
-                "evaluation_sample must be a 2D array."
+                "X_eval must be a 2D array."
             )
 
-        evaluation_sample_size = evaluation_sample.shape[0]
+        n_eval = X_eval.shape[0]
         fit_dir = Path(fit_dir)
 
         temporary_dir = Path(tempfile.mkdtemp(dir=self.exchange_dir))
@@ -303,7 +303,7 @@ class ARFSampler(Sampler):
 
         np.savetxt(
             input_file,
-            evaluation_sample,
+            X_eval,
             delimiter=",",
         )
 
@@ -318,7 +318,7 @@ class ARFSampler(Sampler):
             str(input_file),
             str(output_file),
             str(feature_idx),
-            str(replacement_sample_size),
+            str(n_resamples),
             str(self._next_r_seed()),
         ]
 
@@ -327,28 +327,28 @@ class ARFSampler(Sampler):
             check=True,
         )
 
-        replacement_samples = np.loadtxt(
+        replacement_values = np.loadtxt(
             output_file,
             delimiter=",",
         )
-        replacement_samples = np.asarray(
-            replacement_samples
+        replacement_values = np.asarray(
+            replacement_values
         ).reshape(-1)
 
         expected_size = (
-            evaluation_sample_size
-            * replacement_sample_size
+            n_eval
+            * n_resamples
         )
 
-        if replacement_samples.size != expected_size:
+        if replacement_values.size != expected_size:
             raise RuntimeError(
                 "R returned an unexpected number "
                 "of ARF replacement samples."
             )
 
-        replacement_samples = replacement_samples.reshape(
-            evaluation_sample_size,
-            replacement_sample_size,
+        replacement_values = replacement_values.reshape(
+            n_eval,
+            n_resamples,
         )
 
-        return replacement_samples
+        return replacement_values

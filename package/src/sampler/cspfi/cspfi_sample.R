@@ -4,7 +4,7 @@ suppressPackageStartupMessages({
     library(trtf)
 })
 
-cspfi_sample <- function(fit,X,X_reference,replacement_sample_size,seed = 2026) {
+cspfi_sample <- function(fit,X,X_reference,n_resamples,seed = 2026) {
     X <- as.data.frame(X)
     X_reference <- as.data.frame(X_reference)
     feature_size <- ncol(X)
@@ -24,7 +24,7 @@ cspfi_sample <- function(fit,X,X_reference,replacement_sample_size,seed = 2026) 
     }
     set.seed(seed)
     if (!is.null(fit$constant_value)) {
-        return(matrix(fit$constant_value,nrow = nrow(X),ncol = replacement_sample_size))   # if all values of the target variable are the same then just keep it as constant
+        return(matrix(fit$constant_value,nrow = nrow(X),ncol = n_resamples))   # if all values of the target variable are the same then just keep it as constant
     }
     if (is.null(fit$model)) {
         X_nodes <- rep(1L,nrow(X))
@@ -33,7 +33,7 @@ cspfi_sample <- function(fit,X,X_reference,replacement_sample_size,seed = 2026) 
         X_nodes <- predict(fit$model,newdata = X,type = "node")
         reference_nodes <- predict(fit$model,newdata = X_reference,type = "node")
     }
-    replacement_samples <- t(vapply(seq_len(nrow(X)),function(i) {
+    replacement_values <- t(vapply(seq_len(nrow(X)),function(i) {
         reference_ids <- which(reference_nodes == X_nodes[i])
         replacement_pool <- X_reference[[target_idx_r]][reference_ids]
         if (is.factor(replacement_pool)) {
@@ -43,32 +43,32 @@ cspfi_sample <- function(fit,X,X_reference,replacement_sample_size,seed = 2026) 
         }  # transfer the value into original space for categorical features
         replacement_pool[sample.int(
             length(replacement_pool),
-            size = replacement_sample_size,
+            size = n_resamples,
             replace = TRUE
         )]
-    },numeric(replacement_sample_size)))
-    replacement_samples
+    },numeric(n_resamples)))
+    replacement_values
 }
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 6L) {
-    stop("Expected: fit_file X_file X_reference_file output_file replacement_sample_size seed.")
+    stop("Expected: fit_file X_file X_reference_file output_file n_resamples seed.")
 }
 fit <- readRDS(args[[1L]])
 X <- read.csv(args[[2L]],header = FALSE)
 X_reference <- read.csv(args[[3L]],header = FALSE)
 output_file <- args[[4L]]
-replacement_sample_size <- as.integer(args[[5L]])
+n_resamples <- as.integer(args[[5L]])
 seed <- as.integer(args[[6L]])
-replacement_samples <- cspfi_sample(
+replacement_values <- cspfi_sample(
     fit = fit,
     X = X,
     X_reference = X_reference,
-    replacement_sample_size = replacement_sample_size,
+    n_resamples = n_resamples,
     seed = seed
 )
 write.table(
-    replacement_samples,
+    replacement_values,
     file = output_file,
     sep = ",",
     row.names = FALSE,
