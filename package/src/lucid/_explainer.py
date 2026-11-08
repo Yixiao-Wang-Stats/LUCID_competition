@@ -9,7 +9,10 @@ from tempfile import TemporaryDirectory
 
 from ._model import ModelAdapter
 from ._explanation import Explanation
+import copy
+import os
 
+from joblib import Parallel, delayed, effective_n_jobs, parallel_config
 
 class Explainer:
     """Compute LUCID values for a fitted predictive model."""
@@ -23,6 +26,7 @@ class Explainer:
         feature_types=None,
         cde_kwargs=None,
         output_dir=None,
+        n_jobs=1,
     ):
         
         self.model = ModelAdapter(model)
@@ -38,6 +42,7 @@ class Explainer:
         self.cde = cde
         self.random_state = random_state
         self.cde_kwargs = dict(cde_kwargs or {})
+        self.n_jobs = n_jobs
         # Numeric features are continuous unless explicitly specified.
         self.feature_types = (
             list(feature_types)
@@ -55,7 +60,15 @@ class Explainer:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._samplers = {}
+        self._tabpfn_model = None
 
+        if (
+            self.cde == "tabpfn"
+            and self.cde_kwargs.get("backend", "local") == "local"
+        ):
+            from sampler.tabpfn.tabpfn_sampler import _SharedTabPFNModel
+
+            self._tabpfn_model = _SharedTabPFNModel()
 
     def _new_sampler(self):
         kwargs = {
@@ -121,7 +134,10 @@ class Explainer:
         if self.cde == "tabpfn":
             from sampler.tabpfn.tabpfn_sampler import TabPFNSampler
 
-            return TabPFNSampler(**kwargs)
+            return TabPFNSampler(
+                _shared_model=self._tabpfn_model,
+                **kwargs,
+            )
 
         raise ValueError(
             "cde must be permutation, drbart, arf, cspfi, cmr, gcmr, or tabpfn."
@@ -158,6 +174,60 @@ class Explainer:
 
         return predictions
 
+    def _compute_feature(
+        self,
+        feature_idx,
+        X_eval,
+        reference_predictions,
+        n_resamples,
+        n_eval_batch,
+        n_resamples_batch,
+    ):
+        sampler = self._get_sampler(feature_idx)
+        feature_values = np.empty(len(X_eval))
+
+        for start in range(0, len(X_eval), n_eval_batch):
+            stop = min(start + n_eval_batch, len(X_eval))
+            X_eval_batch = X_eval[start:stop]
+
+            replacement_values = sampler.sample_batch(
+                X_eval=X_eval_batch,
+                feature_indices=[feature_idx],
+                n_resamples=n_resamples,
+                X_reference=self.X_background,
+            )
+
+            for local_row, x in enumerate(X_eval_batch):
+                row = start + local_row
+
+                feature_values[row] = (
+                    lucid_single_observation_single_feature(
+                        x=x,
+                        y=reference_predictions[row],
+                        replacement_sample=replacement_values[local_row, 0],
+                        n_resamples_batch=n_resamples_batch,
+                        loss_type="squared_error",
+                        model=self._predict,
+                        feature_idx=feature_idx,
+                        baseline_loss=0.0,
+                    )
+                )
+
+        return feature_values, sampler
+
+    def _feature_worker(self, feature_idx):
+        worker = copy.copy(self)
+
+        # The parent owns the temporary workspace and its cleanup.
+        worker._temporary_directory = None
+
+        # Send only this feature's existing fit, if available.
+        worker._samplers = {}
+        if feature_idx in self._samplers:
+            worker._samplers[feature_idx] = self._samplers[feature_idx]
+
+        return worker
+  
     def __call__(
         self,
         X_eval,
@@ -187,38 +257,69 @@ class Explainer:
             ]
 
         reference_predictions = self._predict(X_eval)
-        values = np.empty((len(X_eval), len(feature_indices)))
 
-        for column, feature_idx in enumerate(feature_indices):
-            sampler = self._get_sampler(feature_idx)
+        n_workers = effective_n_jobs(self.n_jobs)
 
-            for start in range(0, len(X_eval), n_eval_batch):
-                stop = min(start + n_eval_batch, len(X_eval))
-                X_eval_batch = X_eval[start:stop]
+        # Respect the requested CPU count within a Slurm task.
+        allocated_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+        if allocated_cpus is not None:
+            n_workers = min(n_workers, int(allocated_cpus))
 
-                replacement_values = sampler.sample_batch(
-                    X_eval=X_eval_batch,
-                    feature_indices=[feature_idx],
-                    n_resamples=n_resamples,
-                    X_reference=self.X_background,
+        n_workers = max(1, min(n_workers, len(feature_indices)))
+
+        if n_workers > 1:
+            if len(set(feature_indices)) != len(feature_indices):
+                raise ValueError(
+                    "Parallel execution requires unique selected features."
                 )
 
-                for local_row, x in enumerate(X_eval_batch):
-                    row = start + local_row
+            if self.cde == "tabpfn":
+                backend = "threading"
+                parallel_options = {}
+            else:
+                backend = "loky"
+                parallel_options = {"inner_max_num_threads": 1}
 
-                    values[row, column] = (
-                        lucid_single_observation_single_feature(
-                            x=x,
-                            y=reference_predictions[row],
-                            replacement_sample=replacement_values[local_row, 0],
-                            n_resamples_batch=n_resamples_batch,
-                            loss_type="squared_error",
-                            model=self._predict,
-                            feature_idx=feature_idx,
-                            baseline_loss=0.0,
-                        )
+            with parallel_config(backend=backend, **parallel_options):
+                results = Parallel(
+                    n_jobs=n_workers,
+                    temp_folder=str(self.output_dir),
+                )(
+                    delayed(
+                        self._feature_worker(feature_idx)._compute_feature
+                    )(
+                        feature_idx,
+                        X_eval,
+                        reference_predictions,
+                        n_resamples,
+                        n_eval_batch,
+                        n_resamples_batch,
                     )
+                    for feature_idx in feature_indices
+                )
 
+        else:
+            results = [
+                self._compute_feature(
+                    feature_idx,
+                    X_eval,
+                    reference_predictions,
+                    n_resamples,
+                    n_eval_batch,
+                    n_resamples_batch,
+                )
+                for feature_idx in feature_indices
+            ]
+
+        values = np.empty((len(X_eval), len(feature_indices)))
+
+        for column, (feature_idx, result) in enumerate(
+            zip(feature_indices, results)
+        ):
+            feature_values, sampler = result
+            values[:, column] = feature_values
+            self._samplers[feature_idx] = sampler
+        
         return Explanation(
             values=values,
             feature_names=[

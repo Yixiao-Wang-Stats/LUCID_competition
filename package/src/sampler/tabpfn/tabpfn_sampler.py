@@ -3,14 +3,67 @@ import torch
 
 from tabpfn.architectures.shared.bar_distribution import FullSupportBarDistribution
 from ..sampler import Sampler
+from threading import Lock
 
+class _SharedTabPFNModel:
+    """Retain pretrained networks across feature contexts."""
 
+    def __init__(self):
+        self._lock = Lock()
+        self._specs = {}
+
+    def get_specs(self, model_class, version, options):
+        from tabpfn import ModelSpecs
+
+        # Older versions use separate regression/classification models.
+        multitask = version.value in {"v3.5", "v3.5-fast"}
+        key = (version.value, None if multitask else model_class)
+
+        with self._lock:
+            if key not in self._specs:
+                loader = model_class.create_default_for_version(
+                    version=version, **options
+                )
+                inference_config = loader.get_inference_config()
+
+                if len(loader.devices_) != 1:
+                    raise ValueError(
+                        "Shared feature execution currently requires one device."
+                    )
+
+                for network in loader.models_:
+                    network.to(loader.devices_[0])
+                    if loader.forced_inference_dtype_ is not None:
+                        network.to(dtype=loader.forced_inference_dtype_)
+                    network.eval()
+
+                # Older regressors need this distribution explicitly.
+                norm_criterion = getattr(
+                    loader, "znorm_space_bardist_", None
+                )
+
+                self._specs[key] = [
+                    ModelSpecs(
+                        model=network,
+                        architecture_config=config,
+                        inference_config=inference_config,
+                        norm_criterion=norm_criterion,
+                    )
+                    for network, config in zip(
+                        loader.models_, loader.configs_
+                    )
+                ]
+
+            return self._specs[key]
+
+            
 class TabPFNSampler(Sampler):
     """Conditional replacement sampling with local or hosted TabPFN."""
 
     def __init__(
         self, version="v3.5", backend="local", device="auto",
-        batch_size=256, random_state=None, **model_kwargs,
+        batch_size=256, random_state=None, _shared_model=None,
+        **model_kwargs,
     ):
         super().__init__(random_state=random_state)
         self.version = version
@@ -18,6 +71,11 @@ class TabPFNSampler(Sampler):
         self.device = device
         self.batch_size = batch_size
         self.model_kwargs = dict(model_kwargs)
+        self._shared_model = (
+            _shared_model
+            if _shared_model is not None
+            else _SharedTabPFNModel()
+        )
 
     def fit(self, X_train, feature_idx, feature_type="continuous"):
         X = np.asarray(X_train, dtype=float)
@@ -49,6 +107,8 @@ class TabPFNSampler(Sampler):
             options.setdefault("device", self.device)
             options.setdefault("fit_mode", "fit_with_cache")
             options.setdefault("show_progress_bar", False)
+            # Feature-level threads provide the parallelism.
+            options.setdefault("n_jobs", 1)
         elif self.backend == "hosted":
             from tabpfn_client import TabPFNClassifier, TabPFNRegressor
 
@@ -62,6 +122,12 @@ class TabPFNSampler(Sampler):
             raise ValueError("backend must be 'local' or 'hosted'.")
 
         model_class = TabPFNClassifier if categorical else TabPFNRegressor
+
+        if self.backend == "local":
+            options["model_path"] = self._shared_model.get_specs(
+                model_class, version, options
+            )
+
         self.model_ = model_class.create_default_for_version(
             version=version, **options
         )
@@ -122,22 +188,48 @@ class TabPFNSampler(Sampler):
         )[0, 0]
 
     def _draw(self, criterion, logits, count):
-        with torch.random.fork_rng(devices=[]), torch.inference_mode():
-            torch.manual_seed(self._next_r_seed())
-            bins = torch.multinomial(logits.softmax(-1), count, replacement=True)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(self._next_r_seed())
+
+        with torch.inference_mode():
+            bins = torch.multinomial(
+                logits.softmax(-1),
+                count,
+                replacement=True,
+                generator=generator,
+            )
+
             widths = criterion.bucket_widths
             values = (
                 criterion.borders[bins]
-                + widths[bins] * torch.rand(bins.shape, dtype=logits.dtype)
+                + widths[bins] * torch.rand(
+                    bins.shape,
+                    dtype=logits.dtype,
+                    generator=generator,
+                )
             )
-            lower = criterion.borders[1] - (
-                criterion.halfnormal_with_p_weight_before(widths[0])
-                .sample(bins.shape)
+
+            lower_scale = (
+                criterion.halfnormal_with_p_weight_before(widths[0]).scale
             )
-            upper = criterion.borders[-2] + (
-                criterion.halfnormal_with_p_weight_before(widths[-1])
-                .sample(bins.shape)
+            upper_scale = (
+                criterion.halfnormal_with_p_weight_before(widths[-1]).scale
             )
+
+            lower = criterion.borders[1] - lower_scale * torch.randn(
+                bins.shape,
+                dtype=logits.dtype,
+                generator=generator,
+            ).abs()
+
+            upper = criterion.borders[-2] + upper_scale * torch.randn(
+                bins.shape,
+                dtype=logits.dtype,
+                generator=generator,
+            ).abs()
+
             values = torch.where(bins == 0, lower, values)
-            values = torch.where(bins == logits.shape[-1] - 1, upper, values)
+            values = torch.where(
+                bins == logits.shape[-1] - 1, upper, values
+            )
             return values.numpy()
