@@ -51,57 +51,19 @@ class CMRSampler(Sampler):
 
         return self
     
-    def sample(self, x, feature_idx, n_resamples, X_reference:np.ndarray):
-        if not self.is_fitted:
-            raise RuntimeError(
-                "Sampler must be fitted before sampling."
-            )
-
-        if feature_idx not in self.models:
-            raise RuntimeError(
-                "The sampler has not been fitted for this feature."
-            )
-
-        if n_resamples <= 0:
-            raise ValueError(
-                "n_resamples must be positive."
-            )
-
-        x = np.asarray(x)
-
-        if x.ndim != 1:
-            raise ValueError(
-                "x must be a 1D feature vector."
-            )
-
-        if len(x) != self.feature_size:
-            raise ValueError(
-                "x has the wrong number of features."
-            )
-
-        X_reference = np.asarray(X_reference)
-
-        if X_reference.ndim != 2:
-            raise ValueError(
-                "X_reference must be a 2D array."
-            )
-
-        if X_reference.shape[1] != self.feature_size:
-            raise ValueError(
-                "X_reference has the wrong number of features."
-            )
-
-        model = self.models[feature_idx]
-        x_minus_j = np.delete(x,feature_idx,).reshape(1, -1)
-        conditional_mean_x = model.predict(x_minus_j).item()
-
-        X_reference_minus_j = np.delete(X_reference, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
-        conditional_mean_reference = model.predict(X_reference_minus_j)  # shape (n_eval,)
-        reference_residuals = X_reference[:, feature_idx]-conditional_mean_reference
-        sampled_residuals = self.rng.choice(reference_residuals,size=n_resamples,replace=True,)
-        replacement_values = (conditional_mean_x + sampled_residuals)
-
-        return replacement_values
+    def sample(
+        self,
+        x,
+        feature_idx,
+        n_resamples,
+        X_reference=None,
+    ):
+        return self.sample_batch(
+            X_eval=np.asarray(x)[None, :],
+            feature_indices=[feature_idx],
+            n_resamples=n_resamples,
+            X_reference=X_reference,
+        )[0, 0]
 
     # rewrite sample batch, since for each batch we do not want predict for each samples!
     def sample_batch(

@@ -66,38 +66,16 @@ class CSPFISampler(Sampler):
     def sample(
         self,
         x,
+        feature_idx,
         n_resamples,
-        X_reference,
+        X_reference=None,
     ):
-        if self.fit_dir is None:
-            raise RuntimeError("fit must be called before sample.")
-        x = np.asarray(x)
-        X_reference = np.asarray(X_reference)
-        if x.ndim != 1:
-            raise ValueError("x must be a 1D array.")
-        if X_reference.ndim != 2:
-            raise ValueError("X_reference must be a 2D array.")
-        temporary_dir = Path(tempfile.mkdtemp(dir=self.exchange_dir))
-        X_file = temporary_dir / "X.csv"
-        X_reference_file = temporary_dir / "X_reference.csv"
-        output_file = temporary_dir / "samples.csv"
-        np.savetxt(X_file,x[None,:],delimiter=",")
-        np.savetxt(X_reference_file,X_reference,delimiter=",")
-        subprocess.run(
-            [
-                "Rscript",
-                str(self.sample_script),
-                str(self.fit_dir / "fit.rds"),
-                str(X_file),
-                str(X_reference_file),
-                str(output_file),
-                str(n_resamples),
-                str(self._next_r_seed()),
-            ],
-            check=True,
-        )
-        replacement_values = np.loadtxt(output_file,delimiter=",")
-        return np.asarray(replacement_values).reshape(-1)
+        return self.sample_batch(
+            X_eval=np.asarray(x)[None, :],
+            feature_indices=[feature_idx],
+            n_resamples=n_resamples,
+            X_reference=X_reference,
+        )[0, 0]
 
     
     def sample_batch(

@@ -93,76 +93,19 @@ class GCMRSampler(Sampler):
 
         return self
     
-    def sample(self, x, feature_idx, n_resamples, X_reference:np.ndarray):
-        if not self.is_fitted:
-            raise RuntimeError(
-                "Sampler must be fitted before sampling."
-            )
-
-        if feature_idx not in self.models:
-            raise RuntimeError(
-                "The sampler has not been fitted for this feature."
-            )
-
-        if n_resamples <= 0:
-            raise ValueError(
-                "n_resamples must be positive."
-            )
-
-        x = np.asarray(x)
-
-        if x.ndim != 1:
-            raise ValueError(
-                "x must be a 1D feature vector."
-            )
-
-        if len(x) != self.feature_size:
-            raise ValueError(
-                "x has the wrong number of features."
-            )
-
-        X_reference = np.asarray(X_reference)
-
-        if X_reference.ndim != 2:
-            raise ValueError(
-                "X_reference must be a 2D array."
-            )
-
-        if X_reference.shape[1] != self.feature_size:
-            raise ValueError(
-                "X_reference has the wrong number of features."
-            )
-
-        model = self.models[feature_idx]
-        z = np.empty(self.feature_size)
-
-        for j in range(self.feature_size):
-            z[j] = _to_gaussian_with_empirical_distribution_reference(
-                x[j],
-                self.X_train[:, j],
-            )
-
-        z_minus_j = np.delete(z,feature_idx,).reshape(1, -1)
-        conditional_mean_z = model.predict(z_minus_j).item()
-        
-        Z_reference = np.empty_like(X_reference, dtype=float)
-
-        for j in range(self.feature_size):
-            Z_reference[:, j] = _to_gaussian_with_empirical_distribution_reference(
-                X_reference[:, j],
-                self.X_train[:, j],
-            )
-            
-        Z_reference_minus_j = np.delete(Z_reference, feature_idx, axis=1)
-        conditional_mean_reference = model.predict(Z_reference_minus_j)
-        reference_residuals = (Z_reference[:, feature_idx] - conditional_mean_reference)
-        sampled_residuals = self.rng.choice(reference_residuals,size=n_resamples,replace=True,)
-        replacement_values_gaussian = (conditional_mean_z + sampled_residuals)
-        replacement_values = _from_gaussian_with_empirical_distribution_reference(
-            replacement_values_gaussian,
-            self.X_train[:, feature_idx],
-        )
-        return replacement_values
+    def sample(
+        self,
+        x,
+        feature_idx,
+        n_resamples,
+        X_reference=None,
+    ):
+        return self.sample_batch(
+            X_eval=np.asarray(x)[None, :],
+            feature_indices=[feature_idx],
+            n_resamples=n_resamples,
+            X_reference=X_reference,
+        )[0, 0]
 
     # rewrite sample batch, since for each batch we do not want predict for each samples!
     def sample_batch(

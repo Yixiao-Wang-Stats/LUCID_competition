@@ -150,37 +150,19 @@ class DRBartSampler(Sampler):
         return self
 
 
-    def sample(self, x, feature_idx, n_resamples, X_reference=None):
-        if not self.is_fitted:
-            raise RuntimeError("Sampler must be fitted before sampling.")
-        if feature_idx not in self.fits:
-            raise RuntimeError("The sampler has not been fitted for this feature.")
-        if n_resamples <= 0:
-            raise ValueError("n_resamples must be positive.")
-        x = np.asarray(x)
-        if x.ndim != 1:
-            raise ValueError("x must be a 1D feature vector.")
-        if len(x) != self.feature_size:
-            raise ValueError("x has the wrong number of features.")
-
-        feature_type = self.feature_types[feature_idx]
-
-        if feature_type in {"binary","categorical"}:
-            return self.bart_sampler.sample(
-                x=x,
-                feature_idx=feature_idx,
-                n_resamples=n_resamples,
-                X_reference=X_reference,
-            )
-        
-        x_minus_j = np.delete(x, feature_idx)
-        fit_dir = self.fits[feature_idx]
-        return self._sample_from_r(
-            x_minus_j=x_minus_j,
-            fit_dir=fit_dir,
+    def sample(
+        self,
+        x,
+        feature_idx,
+        n_resamples,
+        X_reference=None,
+    ):
+        return self.sample_batch(
+            X_eval=np.asarray(x)[None, :],
+            feature_indices=[feature_idx],
             n_resamples=n_resamples,
-            mode="lucid"
-        )
+            X_reference=X_reference,
+        )[0, 0]
 
     def sample_posterior_credible_interval(self, x, feature_idx, n_resamples, posterior_id):
         if not self.is_fitted:

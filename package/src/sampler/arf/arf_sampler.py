@@ -119,55 +119,12 @@ class ARFSampler(Sampler):
         n_resamples,
         X_reference=None,
     ):
-        if self.fit_dir is None:
-            if self.output_dir is None:
-                raise ValueError(
-                    "output_dir must be provided."
-                )
-
-            self.fit_dir = self.output_dir
-
-        if not (self.fit_dir / "fit.rds").exists():
-            raise RuntimeError(
-                "ARFSampler must be fitted before sampling."
-            )
-
-        x = np.asarray(x)
-
-        if x.ndim != 1:
-            raise ValueError(
-                "x must be a 1D feature vector."
-            )
-
-        if not 0 <= feature_idx < x.shape[0]:
-            raise ValueError(
-                "feature_idx is out of range."
-            )
-
-        if n_resamples <= 0:
-            raise ValueError(
-                "n_resamples must be positive."
-            )
-        
-        if feature_idx not in self.fits:
-            raise RuntimeError(
-                "The ARF sampler has not been fitted for this feature."
-            )
-
-        fit_dir = self.fits[feature_idx]
-
-        replacement = self.sample_from_r(
-            x=x,
-            feature_idx=feature_idx,
-            fit_dir=fit_dir,
+        return self.sample_batch(
+            X_eval=np.asarray(x)[None, :],
+            feature_indices=[feature_idx],
             n_resamples=n_resamples,
-        )
-
-        if replacement.shape[0] != n_resamples:
-            raise RuntimeError(
-                "ARF returned unexpected number of samples."
-            )
-        return replacement
+            X_reference=X_reference,
+        )[0, 0]
     
 
     def sample_from_r(
