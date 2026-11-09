@@ -16,12 +16,13 @@ class CSPFISampler(Sampler):
         fit_script=None,
         sample_script=None,
     ):
-        super().__init__(random_state=random_state)
+        super().__init__(feature_types=feature_types, random_state=random_state)
+        
+        # File workspace.
+        self.output_dir, self.exchange_dir = self._prepare_workspace(
+            output_dir
+        )
 
-        self.output_dir = Path(output_dir)
-        self.exchange_dir = self.output_dir / "exchange"
-        self.exchange_dir.mkdir(parents=True, exist_ok=True)
-        self.feature_types = feature_types
         self.seed = seed
         self.fit_script = Path(fit_script) if fit_script is not None else Path(__file__).with_name("cspfi_fit.R")
         self.sample_script = Path(sample_script) if sample_script is not None else Path(__file__).with_name("cspfi_sample.R")
@@ -34,13 +35,11 @@ class CSPFISampler(Sampler):
         feature_idx,
         feature_type=None,
     ):
-        X_train = np.asarray(X_train)
-        if X_train.ndim != 2:
-            raise ValueError("X_train must be a 2D array.")
-        if not 0 <= feature_idx < X_train.shape[1]:
-            raise ValueError("feature_idx is out of range.")
-        if len(self.feature_types) != X_train.shape[1]:
-            raise ValueError("feature_types must have one entry per feature.")
+        X_train = self._prepare_fitting(
+            X_train,
+            feature_idx,
+            feature_type=feature_type,
+        )
         self.feature_idx = feature_idx
         self.fit_dir = self.output_dir / f"feature_{feature_idx}"
         self.fit_dir.mkdir(parents=True,exist_ok=True)
@@ -61,6 +60,7 @@ class CSPFISampler(Sampler):
             ],
             check=True,
         )
+        self.is_fitted = True
         return self
     
     def sample_batch(
@@ -73,18 +73,18 @@ class CSPFISampler(Sampler):
         if self.fit_dir is None:
             raise RuntimeError("Sampler must be fitted before sampling.")
 
-        feature_indices = np.asarray(feature_indices, dtype=int)
-        if feature_indices.shape != (1,):
-            raise ValueError("CSPFISampler supports one fitted feature at a time.")
-        if feature_indices[0] != self.feature_idx:
-            raise ValueError("Requested feature does not match the fitted feature.")
-
         X_eval, feature_indices, samples = self._prepare_sampling(
             X_eval,
             feature_indices,
             n_resamples,
             n_features=len(self.feature_types),
         )
+
+        if len(feature_indices) != 1:
+            raise ValueError("CSPFISampler supports one fitted feature at a time.")
+
+        if feature_indices[0] != self.feature_idx:
+            raise ValueError("Requested feature does not match the fitted feature.")
 
         X_background = np.asarray(X_background)
         if X_background.ndim != 2:

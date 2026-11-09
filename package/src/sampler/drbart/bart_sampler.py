@@ -52,6 +52,7 @@ class BartSampler(Sampler):
     def __init__(
         self,
         output_dir,
+        feature_types,
         m=50,
         draws=1000,
         tune=1000,
@@ -59,8 +60,9 @@ class BartSampler(Sampler):
         cores=1,
         seed=2026,
         random_state=None,
+        
     ):
-        super().__init__(random_state)
+        super().__init__(feature_types=feature_types, random_state=random_state)
         self.output_dir = Path(output_dir)
         self.m = m
         self.draws = draws
@@ -69,26 +71,12 @@ class BartSampler(Sampler):
         self.cores = cores
         self.seed = seed
         self.fits = {}
-        self.feature_size = None
 
 
-    def fit(self, X_train, feature_idx, feature_type="binary"):
+    def fit(self, X_train, feature_idx, feature_type=None):
         #  feature type: contains both binary and categorical features 
-        X_train = np.asarray(X_train)
-
-        if X_train.ndim != 2:
-            raise ValueError("X_train must be a 2D array.")
-
-        feature_size = X_train.shape[1]
-
-        if not 0 <= feature_idx < feature_size:
-            raise ValueError("feature_idx is out of range.")
-
-        if self.feature_size is None:
-            self.feature_size = feature_size
-
-        elif self.feature_size != feature_size:
-            raise ValueError("X_train has a different number of features from previous fitted data.")
+        X_train = self._prepare_fitting(X_train,feature_idx,feature_type=feature_type,)
+        feature_type = self.feature_types[feature_idx]
 
         X_minus_j = np.delete(X_train, feature_idx, axis=1)
         X_j = X_train[:, feature_idx]  

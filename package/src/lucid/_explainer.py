@@ -75,6 +75,7 @@ class Explainer:
             "random_state": self.random_state,
             **self.cde_kwargs,
         }
+        kwargs["feature_types"] = self.feature_types
 
         if self.cde == "permutation":
             from sampler.permutation.permutation_sampler import PermutationSampler
@@ -116,13 +117,11 @@ class Explainer:
             elif self.cde == "arf":
                 from sampler.arf.arf_sampler import ARFSampler
 
-                kwargs["feature_types"] = self.feature_types
                 sampler = ARFSampler(**kwargs)
 
             else:
                 from sampler.cspfi.cspfi_sampler import CSPFISampler
 
-                kwargs["feature_types"] = self.feature_types
                 kwargs.setdefault(
                     "seed",
                     self.random_state if self.random_state is not None else 2026,

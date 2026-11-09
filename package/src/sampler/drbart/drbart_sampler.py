@@ -13,6 +13,7 @@ class DRBartSampler(Sampler):
     def __init__(
         self,
         output_dir,
+        feature_types,
         seed=2026,
         nburn=2000,  # default is 5000
         nsim=2000,  # default is 5000
@@ -20,12 +21,11 @@ class DRBartSampler(Sampler):
         m_mean=200,  # default is 200
         m_var=100,  # default is 100
         variance="ux",  
-        random_state=None
+        random_state=None,
     ):
-        super().__init__(random_state=random_state)
-        self.output_dir = Path(output_dir)
-        self.exchange_dir = self.output_dir / "exchange"
-        self.exchange_dir.mkdir(parents=True, exist_ok=True)  # just use to avoid conflicts when running in parallel
+        super().__init__(feature_types=feature_types,random_state=random_state)
+        
+        # Method configuration.
         self.seed = seed
         self.nburn = nburn
         self.nsim = nsim
@@ -33,13 +33,19 @@ class DRBartSampler(Sampler):
         self.m_mean = m_mean
         self.m_var = m_var
         self.variance = variance
+        
+        # File workspace.
+        self.output_dir, self.exchange_dir = self._prepare_workspace(
+            output_dir
+        )
+
+        # State populated during fitting.
         self.fits = {}  # fits is the same usage as models in cmr just use to save
-        self.feature_size = None
-        self.feature_types = {}  # if feature is binary or categorical, we change to bart
-        self.feature_bounds = {}
-        self.feature_names = {}
+
+        # Conditional models for binary and categorical targets.
         self.bart_sampler = BartSampler(
             output_dir=self.output_dir,
+            feature_types=self.feature_types,
             m=50,
             draws=1000,
             tune=1000,
@@ -49,27 +55,9 @@ class DRBartSampler(Sampler):
             random_state=random_state,
         )
 
-    def fit(self, X_train, feature_idx, feature_type="continuous"):
-        X_train = np.asarray(X_train)
-
-        if X_train.ndim != 2:
-            raise ValueError("X_train must be a 2D array.")
-
-        feature_size = X_train.shape[1]
-
-        if not 0 <= feature_idx < feature_size:
-            raise ValueError("feature_idx is out of range.")
-
-        if self.feature_size is None:
-            self.feature_size = feature_size
-
-        elif self.feature_size != feature_size:
-            raise ValueError("X_train has a different number of features from previous fitted data.")
-
-        if feature_type not in {"continuous","binary","categorical"}:
-            raise ValueError("feature_type must be 'continuous', 'binary', or 'categorical'.")
-
-        self.feature_types[feature_idx] = feature_type
+    def fit(self, X_train, feature_idx, feature_type=None,):
+        X_train = self._prepare_fitting(X_train, feature_idx, feature_type=feature_type,)
+        feature_type = self.feature_types[feature_idx]
 
         if feature_type in {"binary","categorical"}:
             self.bart_sampler.fit(X_train,feature_idx,feature_type=feature_type)
@@ -127,9 +115,8 @@ class DRBartSampler(Sampler):
             X_eval,
             feature_indices,
             n_resamples,
-            n_features=self.feature_size,
+            n_features=len(self.feature_types),
         )
-        n_eval = len(X_eval)
         for local_j,feature_idx in enumerate(feature_indices):
             if feature_idx not in self.fits:
                 raise RuntimeError("The sampler has not been fitted for this feature.")
@@ -173,23 +160,16 @@ class DRBartSampler(Sampler):
     ):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
-        X_eval = np.asarray(X_eval)
-        if X_eval.ndim != 2:
-            raise ValueError("X_eval must be a 2D array.")
-        if X_eval.shape[1] != self.feature_size:
-            raise ValueError("X_eval has the wrong number of features.")
-        feature_indices = np.asarray(feature_indices)
-        if feature_indices.ndim != 1:
-            raise ValueError("feature_indices must be a 1D array.")
-        if n_resamples <= 0:
-            raise ValueError("n_resamples must be positive.")
+
+        X_eval, feature_indices, samples = self._prepare_sampling(
+            X_eval,
+            feature_indices,
+            n_resamples,
+            n_features=len(self.feature_types),
+        )
+
         if posterior_id <= 0:
             raise ValueError("posterior_id must be positive.")
-        n_eval = X_eval.shape[0]
-        selected_feature_size = len(feature_indices)
-        samples = np.empty(
-            (n_eval, selected_feature_size, n_resamples)
-        )
        
         for local_j,feature_idx in enumerate(feature_indices):
             if feature_idx not in self.fits:
@@ -275,8 +255,3 @@ class DRBartSampler(Sampler):
         ).reshape(n_eval, n_resamples)
 
         return replacement_values
-
-
-    # helper function for seed in order to make sure every call produces a different seed
-    def _next_r_seed(self):
-        return int(self.rng.integers(0,2**31 - 1))

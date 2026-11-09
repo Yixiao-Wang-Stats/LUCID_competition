@@ -59,11 +59,17 @@ class TabPFNSampler(Sampler):
     """Conditional replacement sampling with local or hosted TabPFN."""
 
     def __init__(
-        self, version="v3.5", backend="local", device="auto",
-        batch_size=256, random_state=None, _shared_model=None,
+        self, 
+        feature_types,
+        version="v3.5", 
+        backend="local", 
+        device="auto",
+        batch_size=256, 
+        random_state=None, 
+        _shared_model=None,
         **model_kwargs,
     ):
-        super().__init__(random_state=random_state)
+        super().__init__(random_state=random_state, feature_types=feature_types)
         self.version = version
         self.backend = backend
         self.device = device
@@ -75,9 +81,14 @@ class TabPFNSampler(Sampler):
             else _SharedTabPFNModel()
         )
 
-    def fit(self, X_train, feature_idx, feature_type="continuous"):
-        X = np.asarray(X_train, dtype=float)
-        self.feature_size = X.shape[1]
+    def fit(self, X_train, feature_idx, feature_type=None):
+        X = self._prepare_fitting(
+            np.asarray(X_train, dtype=float),
+            feature_idx,
+            feature_type=feature_type,
+        )
+        feature_type = self.feature_types[feature_idx]
+        
         self.feature_idx = feature_idx
         self.feature_type = feature_type
         context = np.delete(X, feature_idx, axis=1)

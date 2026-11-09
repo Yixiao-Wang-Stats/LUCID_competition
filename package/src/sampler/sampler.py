@@ -6,11 +6,24 @@
 
 from abc import ABC, abstractmethod
 import numpy as np
+from pathlib import Path
 
 class Sampler(ABC):
-    def __init__(self, random_state=None):
+    def __init__(self, feature_types, random_state=None):
         self.random_state = random_state
         self.rng = np.random.default_rng(random_state)
+
+        if feature_types is None:
+            raise ValueError("feature_types must be provided.")
+
+        self.feature_types = list(feature_types)
+        if any(
+            feature_type not in {"continuous", "binary", "categorical"}
+            for feature_type in self.feature_types
+        ):
+            raise ValueError("Feature types must be binary, categorical, or continuous.")
+
+        self.feature_size = None
         self.is_fitted = False
 
     @abstractmethod
@@ -89,8 +102,36 @@ class Sampler(ABC):
     def _next_r_seed(self):
         return int(self.rng.integers(0,2**31 - 1))
 
+    def _prepare_fitting(
+        self, 
+        X_train, 
+        feature_idx, 
+        feature_type=None
+    ):
+        """Validate training data against the stored feature schema."""
+        X_train = np.asarray(X_train)
+        if X_train.ndim != 2:
+            raise ValueError("X_train must be a 2D array.")
+
+        feature_size = X_train.shape[1]
+
+        if not 0 <= feature_idx < feature_size:
+            raise ValueError("feature_idx is out of range.")
+
+        if len(self.feature_types) != feature_size:
+            raise ValueError("feature_types must have one entry per feature.")
+
+        if self.feature_size is not None and self.feature_size != feature_size:
+            raise ValueError("X_train has a different number of features from previous fitted data.")
+
+        if feature_type is not None and feature_type != self.feature_types[feature_idx]:
+            raise ValueError("feature_type does not match feature_types[feature_idx].")
+
+        self.feature_size = feature_size
+        return X_train
+
+    @staticmethod
     def _prepare_sampling(
-        self,
         X_eval,
         feature_indices,
         n_resamples,
@@ -114,3 +155,11 @@ class Sampler(ABC):
             (len(X_eval), len(feature_indices), n_resamples)
         )
         return X_eval, feature_indices, samples
+    
+    @staticmethod
+    def _prepare_workspace(output_dir):
+        """Create the workspace used to exchange files with R."""
+        output_dir = Path(output_dir)
+        exchange_dir = output_dir / "exchange"
+        exchange_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir, exchange_dir

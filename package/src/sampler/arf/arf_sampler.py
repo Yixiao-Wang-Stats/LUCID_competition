@@ -12,17 +12,17 @@ class ARFSampler(Sampler):
     def __init__(
         self,
         output_dir,
+        feature_types,
         random_state=None,
-        feature_types=None,
     ):
-        super().__init__(random_state=random_state)
+        super().__init__(feature_types=feature_types, random_state=random_state)
 
-        self.output_dir = Path(output_dir)
-        self.exchange_dir = self.output_dir / "exchange"
-        self.exchange_dir.mkdir(parents=True, exist_ok=True)
+        # File workspace.
+        self.output_dir, self.exchange_dir = self._prepare_workspace(
+            output_dir
+        )
+        
         self.fit_dir = None
-        self.feature_size = None
-        self.feature_types = list(feature_types) if feature_types is not None else None
         self.fits = {}
 
 
@@ -32,30 +32,15 @@ class ARFSampler(Sampler):
         feature_idx,
         feature_type=None,
     ):
-    # note that arf train a whole tree at one time then use marginal to get CDE, so we do not need feature idx in fit for real case.
-        X_train = np.asarray(X_train)
-
-        if X_train.ndim != 2:
-            raise ValueError("X_train must be a 2D array.")
-
-        if not 0 <= feature_idx < X_train.shape[1]:
-            raise ValueError("feature_idx is out of range.")
+        # note that arf train a whole tree at one time then use marginal to get CDE, so we do not need feature idx in fit for real case.
+        X_train = self._prepare_fitting(
+            X_train,
+            feature_idx,
+            feature_type=feature_type,
+        )
 
         if self.output_dir is None:
             raise ValueError("output_dir must be provided.")
-        feature_size = X_train.shape[1]
-        
-        if self.feature_types is None:
-            raise ValueError("feature_types must be provided for all features.")
-        if len(self.feature_types) != feature_size:
-            raise ValueError("feature_types must have one entry per feature.")
-        if any(t not in {"binary","categorical","continuous"} for t in self.feature_types):
-            raise ValueError("Feature types must be binary, categorical, or continuous.")
-        if feature_type is not None and feature_type != self.feature_types[feature_idx]:
-            raise ValueError("feature_type does not match feature_types[feature_idx].")
-    
-        if self.feature_size is None:
-            self.feature_size = feature_size
 
         self.fit_dir = self.output_dir / f"feature_{feature_idx}"
         self.fit_dir.mkdir(parents=True, exist_ok=True)

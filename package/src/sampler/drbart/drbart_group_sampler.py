@@ -12,6 +12,7 @@ class DRBartGroupSampler(DRBartSampler):
     def __init__(
         self,
         output_dir,
+        feature_types,
         seed=2026,
         nburn=2000,
         nsim=2000,
@@ -23,6 +24,7 @@ class DRBartGroupSampler(DRBartSampler):
     ):
         super().__init__(
             output_dir=output_dir,
+            feature_types=feature_types,
             seed=seed,
             nburn=nburn,
             nsim=nsim,
@@ -42,7 +44,8 @@ class DRBartGroupSampler(DRBartSampler):
             raise ValueError("X_train must be a 2D array.")
 
         feature_size = X_train.shape[1]
-
+        if len(self.feature_types) != feature_size:
+            raise ValueError("feature_types must have one entry per feature.")
         feature_indices = np.asarray(feature_indices)
         if feature_indices.ndim != 1:
             raise ValueError("feature_indices must be a 1D array.")
@@ -58,22 +61,16 @@ class DRBartGroupSampler(DRBartSampler):
         elif self.feature_size != feature_size:
             raise ValueError("X_train has a different number of features from previous fitted data.")
 
-        # default version of feature type is continuous.
+        expected_types = [
+            self.feature_types[feature_idx]
+            for feature_idx in feature_indices
+        ]
+
         if feature_types is None:
-            feature_types = ["continuous"] * len(feature_indices)
-
-        if len(feature_types) != len(feature_indices):
-            raise ValueError("feature_types must have the same length as feature_indices.")
-
-        # for feature_type in feature_types:
-        #     if feature_type != "continuous":
-        #         raise NotImplementedError(
-        #             "DRBartGroupSampler currently supports continuous group features only."
-        #         )
-        for feature_type in feature_types:
-            if feature_type not in {"continuous","binary","categorical"}:
-                raise ValueError("feature_type must be 'continuous', 'binary', or 'categorical'.")
-
+            feature_types = expected_types
+        elif list(feature_types) != expected_types:
+            raise ValueError("Group feature types do not match the stored feature schema.")
+     
         feature_indices = [int(feature_idx) for feature_idx in feature_indices]
         group_key = tuple(feature_indices)
         group_output_dir = self.output_dir / (

@@ -36,37 +36,23 @@ def _from_gaussian_with_empirical_distribution_reference(sample, empirical_distr
 class GCMRSampler(Sampler):
     def __init__(
         self,
+        feature_types,
         predictive_model_class,
         predictive_model_kwargs=None,
         random_state=None,
     ):
-        super().__init__(random_state)
+        super().__init__(feature_types=feature_types, random_state=random_state)
         self.predictive_model_class = predictive_model_class
         if predictive_model_kwargs is None:
             predictive_model_kwargs = {}
         self.predictive_model_kwargs = predictive_model_kwargs
         self.models = {}
         self.residuals = {}
-        self.feature_size = None
         self.X_train = None
 
     def fit(self, X_train, feature_idx, feature_type=None,):
-        X_train = np.asarray(X_train)
-
-        if X_train.ndim != 2:
-            raise ValueError("X_train must be a 2D array.")
-        
+        X_train = self._prepare_fitting(X_train, feature_idx, feature_type)
         feature_size = X_train.shape[1]
-
-        if not 0 <= feature_idx < feature_size:
-            raise ValueError("feature_idx is out of range.")
-
-        if self.feature_size is None:
-            self.feature_size = feature_size
-
-        elif self.feature_size != feature_size:
-            raise ValueError("X_train has a different number of features from previous fitted data.")
-        
         # fit model on z_-j, where z_j is the Gaussian-transformed feature j
         self.X_train = X_train
         Z_train = np.empty_like(X_train, dtype=float)
