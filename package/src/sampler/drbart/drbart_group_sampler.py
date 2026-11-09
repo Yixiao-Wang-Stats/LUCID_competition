@@ -39,9 +39,7 @@ class DRBartGroupSampler(DRBartSampler):
         X_train = np.asarray(X_train)
 
         if X_train.ndim != 2:
-            raise ValueError(
-                "X_train must be a 2D array."
-            )
+            raise ValueError("X_train must be a 2D array.")
 
         feature_size = X_train.shape[1]
 
@@ -74,9 +72,7 @@ class DRBartGroupSampler(DRBartSampler):
         #         )
         for feature_type in feature_types:
             if feature_type not in {"continuous","binary","categorical"}:
-                raise ValueError(
-                    "feature_type must be 'continuous', 'binary', or 'categorical'."
-                )
+                raise ValueError("feature_type must be 'continuous', 'binary', or 'categorical'.")
 
         feature_indices = [int(feature_idx) for feature_idx in feature_indices]
         group_key = tuple(feature_indices)
@@ -161,13 +157,14 @@ class DRBartGroupSampler(DRBartSampler):
         X_eval,
         feature_indices,
         n_resamples,
-        X_reference=None,
+        X_background=None,
     ):
         return self._sample_group_batch(
             X_eval=X_eval,
             feature_indices=feature_indices,
             n_resamples=n_resamples,
             mode="lucid",
+            X_background=X_background,
         )
 
 
@@ -178,6 +175,7 @@ class DRBartGroupSampler(DRBartSampler):
         n_resamples,
         mode,
         factor_posterior_ids=None,
+        X_background=None,
     ):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
@@ -209,9 +207,7 @@ class DRBartGroupSampler(DRBartSampler):
             if factor_posterior_ids is None:
                 raise ValueError("factor_posterior_ids is required for credible_interval mode.")
             if len(factor_posterior_ids) != len(feature_indices):
-                raise ValueError(
-                    "factor_posterior_ids must have the same length as feature_indices."
-                )
+                raise ValueError("factor_posterior_ids must have the same length as feature_indices.")
 
         n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
@@ -233,7 +229,7 @@ class DRBartGroupSampler(DRBartSampler):
             feature_type = factor_fit["feature_type"]
             conditioning_indices = factor_fit["conditioning_indices"]  # conditioning indices (remaining features),outside the group
             fit_dir = factor_fit["fit_dir"]
-
+            feature_idx = factor_fit["feature_idx"]
             if local_j == 0:
                 conditioning_data = X_eval[:,conditioning_indices]  # all features reamining here 
 
@@ -249,6 +245,10 @@ class DRBartGroupSampler(DRBartSampler):
                         ),
                     )
                 else:
+                    bounds = self._resolve_feature_bounds(
+                        X_background=np.asarray(X_background)[:, [feature_idx]],
+                        feature_types=["continuous"],
+                    )[0]
                     replacement_values = self._sample_batch_from_r(
                         X_eval_minus_j=conditioning_data,
                         fit_dir=fit_dir,
@@ -259,6 +259,7 @@ class DRBartGroupSampler(DRBartSampler):
                             if mode == "credible_interval"
                             else None
                         ),
+                        bounds=bounds,
                     )
 
                 samples[:,local_j,:] = replacement_values  # shape: (n_eval, 1, n_resamples)
@@ -316,6 +317,11 @@ class DRBartGroupSampler(DRBartSampler):
                     ),
                 )
             else:
+                bounds = self._resolve_feature_bounds(
+                    X_background=np.asarray(X_background)[:, [feature_idx]],
+                    feature_types=["continuous"],
+                )[0]
+
                 replacement_values = self._sample_batch_from_r(
                     X_eval_minus_j=conditioning_data,
                     fit_dir=fit_dir,
@@ -326,6 +332,7 @@ class DRBartGroupSampler(DRBartSampler):
                         if mode == "credible_interval"
                         else None
                     ),
+                    bounds=bounds,
                 )
             replacement_values = replacement_values.reshape(
                 n_eval,
@@ -342,7 +349,7 @@ class DRBartGroupSampler(DRBartSampler):
         feature_indices,
         n_resamples,
         posterior_id,
-        X_reference=None,
+        X_background=None,
     ):
         if posterior_id <= 0:
             raise ValueError("posterior_id must be positive.")
@@ -358,9 +365,7 @@ class DRBartGroupSampler(DRBartSampler):
         )
 
         if group_key not in self.group_fits:
-            raise RuntimeError(
-                "The sampler has not been fitted for this feature group."
-            )
+            raise RuntimeError("The sampler has not been fitted for this feature group.")
 
         group_fits = self.group_fits[group_key]
         
@@ -389,4 +394,5 @@ class DRBartGroupSampler(DRBartSampler):
             n_resamples=n_resamples,
             mode="credible_interval",
             factor_posterior_ids=factor_posterior_ids,
+            X_background=X_background,
         )

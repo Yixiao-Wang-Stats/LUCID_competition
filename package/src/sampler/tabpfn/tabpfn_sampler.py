@@ -27,9 +27,7 @@ class _SharedTabPFNModel:
                 inference_config = loader.get_inference_config()
 
                 if len(loader.devices_) != 1:
-                    raise ValueError(
-                        "Shared feature execution currently requires one device."
-                    )
+                    raise ValueError("Shared feature execution currently requires one device.")
 
                 for network in loader.models_:
                     network.to(loader.devices_[0])
@@ -79,6 +77,7 @@ class TabPFNSampler(Sampler):
 
     def fit(self, X_train, feature_idx, feature_type="continuous"):
         X = np.asarray(X_train, dtype=float)
+        self.feature_size = X.shape[1]
         self.feature_idx = feature_idx
         self.feature_type = feature_type
         context = np.delete(X, feature_idx, axis=1)
@@ -137,16 +136,23 @@ class TabPFNSampler(Sampler):
 
     def sample_batch(
         self, X_eval, feature_indices,
-        n_resamples, X_reference=None,
+        n_resamples, X_background=None,
     ):
         if not self.is_fitted:
-            raise RuntimeError("Call fit before sampling.")
+            raise RuntimeError("Sampler must be fitted before sampling.")
+
+        X_eval, feature_indices, samples = self._prepare_sampling(
+            X_eval,
+            feature_indices,
+            n_resamples,
+            n_features=self.feature_size,
+        )
+
         if list(feature_indices) != [self.feature_idx]:
             raise ValueError("Requested feature differs from fitted feature.")
 
         X = np.asarray(X_eval, dtype=float)
         context = np.delete(X, self.feature_idx, axis=1)
-        samples = np.empty((len(X), 1, n_resamples))
 
         if self._constant is not None:
             samples.fill(self._constant)
@@ -180,11 +186,11 @@ class TabPFNSampler(Sampler):
         return samples  # (n_eval, n_selected_features, n_resamples)
 
     def sample(
-        self, x, feature_idx, n_resamples, X_reference=None,
+        self, x, feature_idx, n_resamples, X_background=None,
     ):
         return self.sample_batch(
             np.asarray(x)[None, :], [feature_idx],
-            n_resamples, X_reference,
+            n_resamples, X_background,
         )[0, 0]
 
     def _draw(self, criterion, logits, count):

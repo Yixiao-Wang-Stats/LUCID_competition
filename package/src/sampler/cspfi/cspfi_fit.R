@@ -42,7 +42,7 @@ cspfi_fit <- function(X_train,output_dir,feature_types,feature_idx,seed = 2026) 
     set.seed(seed)
     model <- NULL
     constant_value <- NULL
-    # below follow the same logic of source code in cspfi
+    # below follow the same logic of source code in cspfi/R/Conditional.R
     if (length(unique(y)) == 1L) {
         constant_value <- as.numeric(as.character(y[1L]))
     } else if (feature_size > 1L) {

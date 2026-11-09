@@ -36,6 +36,7 @@ arf_fit <- function(X_train,output_dir,feature_types,seed = 2026) {
     saveRDS(schema,file = file.path(output_dir,"schema.rds"))
     invisible(fit)
 }
+
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 4L) {
     stop("Invalid number of arguments.")

@@ -9,6 +9,7 @@ class CMRSampler(Sampler):
         random_state=None,
     ):
         super().__init__(random_state)
+        # Model class for estimating E[X_j | X_-j]. 
         self.predictive_model_class = predictive_model_class
         if predictive_model_kwargs is None:
             predictive_model_kwargs = {}
@@ -21,25 +22,18 @@ class CMRSampler(Sampler):
         X_train = np.asarray(X_train)
 
         if X_train.ndim != 2:
-            raise ValueError(
-                "X_train must be a 2D array."
-            )
+            raise ValueError("X_train must be a 2D array.")
         
         feature_size = X_train.shape[1]
 
         if not 0 <= feature_idx < feature_size:
-            raise ValueError(
-                "feature_idx is out of range."
-            )
+            raise ValueError("feature_idx is out of range.")
 
         if self.feature_size is None:
             self.feature_size = feature_size
 
         elif self.feature_size != feature_size:
-            raise ValueError(
-                "X_train has a different number of features "
-                "from previous fitted data."
-            )
+            raise ValueError("X_train has a different number of features from previous fitted data.")
         
         # fit model on x_-j
         X_minus_j = np.delete(X_train, feature_idx, axis=1)
@@ -51,98 +45,53 @@ class CMRSampler(Sampler):
 
         return self
     
-    def sample(
-        self,
-        x,
-        feature_idx,
-        n_resamples,
-        X_reference=None,
-    ):
-        return self.sample_batch(
-            X_eval=np.asarray(x)[None, :],
-            feature_indices=[feature_idx],
-            n_resamples=n_resamples,
-            X_reference=X_reference,
-        )[0, 0]
-
-    # rewrite sample batch, since for each batch we do not want predict for each samples!
     def sample_batch(
         self,
         X_eval,
         feature_indices,
         n_resamples,
-        X_reference=None,
+        X_background=None,
     ):
+        """Generate replacements using conditional means and resampled residuals.
+
+        For each feature, predict its conditional mean at each evaluation
+        observation and add residuals sampled with replacement from the
+        background residual pool.
+
+        `X_background` supplies the observations used to calculate residuals.
+        Returns an array of shape
+        (n_eval, n_selected_features, n_resamples).
+        """
         if not self.is_fitted:
-            raise RuntimeError(
-                "Sampler must be fitted before sampling."
-            )
+            raise RuntimeError("Sampler must be fitted before sampling.")
+        X_eval, feature_indices, samples = self._prepare_sampling(
+            X_eval,
+            feature_indices,
+            n_resamples,
+            n_features=self.feature_size,
+        )
+        n_eval = len(X_eval)
 
+        X_background = np.asarray(X_background)
+        if X_background.ndim != 2:
+            raise ValueError("X_background must be a 2D array.")
+        if X_background.shape[1] != self.feature_size:
+            raise ValueError("X_background has the wrong number of features.")
 
-        X_eval = np.asarray(X_eval)
-
-        if X_eval.ndim != 2:
-            raise ValueError(
-                "X_eval must be a 2D array."
-            )
-
-
-        if X_eval.shape[1] != self.feature_size:
-            raise ValueError(
-                "X_eval has the wrong number of features."
-            )
-
-
-        feature_indices = np.asarray(feature_indices)
-
-        if feature_indices.ndim != 1:
-            raise ValueError(
-                "feature_indices must be a 1D array."
-            )
-
-
-        if n_resamples <= 0:
-            raise ValueError(
-                "n_resamples must be positive."
-            )
-
-
-        X_reference = np.asarray(X_reference)
-
-        if X_reference.ndim != 2:
-            raise ValueError(
-                "X_reference must be a 2D array."
-            )
-
-
-        if X_reference.shape[1] != self.feature_size:
-            raise ValueError(
-                "X_reference has the wrong number of features."
-            )
-
-
-        n_eval = X_eval.shape[0]
-        selected_feature_size = len(feature_indices)
-        samples = np.empty(
-                (n_eval, selected_feature_size, n_resamples)
-            )
         for local_j, feature_idx in enumerate(feature_indices):
             if feature_idx not in self.models:
-                raise RuntimeError(
-                    "The sampler has not been fitted for this feature."
-                )
+                raise RuntimeError("The sampler has not been fitted for this feature.")
 
             model = self.models[feature_idx]
             # predict conditional mean for the whole evaluation batch
             X_eval_minus_j = np.delete(X_eval,feature_idx,axis=1,)
             conditional_mean_evaluation = model.predict(X_eval_minus_j)  # shape (n_eval,)
 
-            # calculate residual pool on the reference dataset
-            X_reference_minus_j = np.delete(X_reference, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
-            conditional_mean_reference = model.predict(X_reference_minus_j)  # shape (n_eval,)
-            reference_residuals = X_reference[:, feature_idx]-conditional_mean_reference
+            # calculate residual pool on the x_background dataset
+            X_background_minus_j = np.delete(X_background, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
+            conditional_mean_reference = model.predict(X_background_minus_j)  # shape (n_eval,)
+            reference_residuals = X_background[:, feature_idx]-conditional_mean_reference
             sampled_residuals = self.rng.choice(reference_residuals,size=(n_eval,n_resamples,),replace=True,)  # shape (n_eval, n_resamples)
-
 
             replacement_values = (conditional_mean_evaluation[:, None]+ sampled_residuals) # shape (n_eval, n_resamples)
             samples[:, local_j, :] = replacement_values

@@ -57,20 +57,12 @@ class ARFSampler(Sampler):
         if self.feature_size is None:
             self.feature_size = feature_size
 
-        # self.fit_dir = self.output_dir
-        # fit seperately for now. Avoiding saving conflicts.
         self.fit_dir = self.output_dir / f"feature_{feature_idx}"
         self.fit_dir.mkdir(parents=True, exist_ok=True)
 
         fit_file = self.fit_dir / "fit.rds"
         psi_file = self.fit_dir / "psi.rds"
-
-        # # ARF models the joint distribution of all features.
-        # # Therefore all features share the same fitted ARF.
-        # if fit_file.exists() and psi_file.exists():
-        #     self.is_fitted = True
-        #     return self
-
+        schema_file = self.fit_dir / "schema.rds"
         X_train_file = self.fit_dir / "X_train.csv"
         feature_types_file = self.fit_dir / "feature_types.txt"
         feature_types_file.write_text("\n".join(self.feature_types) + "\n")
@@ -88,21 +80,18 @@ class ARFSampler(Sampler):
             else 2026
         )
 
-        command = [
-            "Rscript",
-            str(script_file),
-            str(X_train_file),
-            str(self.fit_dir),
-            str(seed),
-            str(feature_types_file),
-        ]
-
         subprocess.run(
-            command,
+            [
+                "Rscript",
+                str(script_file),
+                str(X_train_file),
+                str(self.fit_dir),
+                str(seed),
+                str(feature_types_file),
+            ],
             check=True,
         )
 
-        schema_file = self.fit_dir / "schema.rds"
         if not fit_file.exists() or not psi_file.exists() or not schema_file.exists():
             raise RuntimeError("ARF fitting did not generate fit.rds, psi.rds, and schema.rds.")
 
@@ -111,201 +100,57 @@ class ARFSampler(Sampler):
 
         return self
 
-
-    def sample(
-        self,
-        x,
-        feature_idx,
-        n_resamples,
-        X_reference=None,
-    ):
-        return self.sample_batch(
-            X_eval=np.asarray(x)[None, :],
-            feature_indices=[feature_idx],
-            n_resamples=n_resamples,
-            X_reference=X_reference,
-        )[0, 0]
-    
-
-    def sample_from_r(
-        self,
-        x,
-        feature_idx,
-        fit_dir,
-        n_resamples,
-    ):
-        script_file = Path(__file__).with_name("arf_sample.R")
-        seed = int(self.rng.integers(0,np.iinfo(np.int32).max,))
-        temporary_dir = Path(tempfile.mkdtemp(dir=self.exchange_dir))
-
-        input_file = temporary_dir / "x.csv"
-        output_file = temporary_dir / "replacement.csv"
-        np.savetxt(
-            input_file,
-            x.reshape(1,-1),
-            delimiter=",",
-        )
-
-        command = [
-            "Rscript",
-            str(script_file),
-            str(fit_dir),
-            str(input_file),
-            str(output_file),
-            str(feature_idx),
-            str(n_resamples),
-            str(seed),
-        ]
-
-        subprocess.run(command,check=True,)
-        if not output_file.exists():
-            raise RuntimeError(
-                "ARF sampling did not generate output."
-            )
-
-        replacement = np.asarray(np.loadtxt(output_file,delimiter=",",)).reshape(-1)
-
-        return replacement
-
-
     def sample_batch(
         self,
         X_eval,
         feature_indices,
         n_resamples,
-        X_reference=None,
+        X_background=None,
     ):
         if not self.is_fitted:
-            raise RuntimeError(
-                "Sampler must be fitted before sampling."
-            )
-
-        X_eval = np.asarray(X_eval)
-
-        if X_eval.ndim != 2:
-            raise ValueError(
-                "X_eval must be a 2D array."
-            )
-
-        if X_eval.shape[1] != self.feature_size:
-            raise ValueError(
-                "X_eval has the wrong number of features."
-            )
-
-        feature_indices = np.asarray(feature_indices,dtype=int,)
-
-        if feature_indices.ndim != 1:
-            raise ValueError(
-                "feature_indices must be a 1D array."
-            )
-
-        if n_resamples <= 0:
-            raise ValueError(
-                "n_resamples must be positive."
-            )
-
-        n_eval = X_eval.shape[0]
-        selected_feature_size = len(feature_indices)
-
-        samples = np.empty(
-            (
-                n_eval,
-                selected_feature_size,
-                n_resamples,
-            )
+            raise RuntimeError("Sampler must be fitted before sampling.")
+        
+        X_eval, feature_indices, samples = self._prepare_sampling(
+            X_eval,
+            feature_indices,
+            n_resamples,
+            n_features=self.feature_size,
         )
-
+        n_eval = len(X_eval)
         for local_j, feature_idx in enumerate(feature_indices):
             if feature_idx not in self.fits:
-                raise RuntimeError(
-                    "The ARF sampler has not been fitted "
-                    "for this feature."
-                )
+                raise RuntimeError("The ARF sampler has not been fitted for this feature.")
 
             fit_dir = self.fits[feature_idx]
 
-            replacement_values = self._sample_batch_from_r(
-                X_eval=X_eval,
-                feature_idx=feature_idx,
-                fit_dir=fit_dir,
-                n_resamples=n_resamples,
+            # sample replacement values using R
+            temporary_dir = Path(tempfile.mkdtemp(dir=self.exchange_dir))
+            input_file = temporary_dir / "evaluation_sample.csv"
+            output_file = temporary_dir / "replacement_samples.csv"
+
+            np.savetxt(input_file, X_eval, delimiter=",")
+
+            subprocess.run(
+                [
+                    "Rscript",
+                    str(Path(__file__).with_name("arf_sample.R")),
+                    str(fit_dir),
+                    str(input_file),
+                    str(output_file),
+                    str(feature_idx),
+                    str(n_resamples),
+                    str(self._next_r_seed()),
+                ],
+                check=True,
             )
 
+            replacement_values = np.asarray(np.loadtxt(output_file, delimiter=",")).reshape(-1)
+
+            if replacement_values.size != n_eval * n_resamples:
+                raise RuntimeError("R returned an unexpected number of ARF replacement samples.")
+
+            replacement_values = replacement_values.reshape(n_eval, n_resamples)
             samples[:, local_j, :] = replacement_values
 
         return samples
     
-
-    def _sample_batch_from_r(
-        self,
-        X_eval,
-        feature_idx,
-        fit_dir,
-        n_resamples,
-    ):
-        X_eval = np.asarray(X_eval)
-
-        if X_eval.ndim != 2:
-            raise ValueError(
-                "X_eval must be a 2D array."
-            )
-
-        n_eval = X_eval.shape[0]
-        fit_dir = Path(fit_dir)
-
-        temporary_dir = Path(tempfile.mkdtemp(dir=self.exchange_dir))
-
-        input_file = temporary_dir / "evaluation_sample.csv"
-        output_file = temporary_dir / "replacement_samples.csv"
-
-        np.savetxt(
-            input_file,
-            X_eval,
-            delimiter=",",
-        )
-
-        script_path = Path(__file__).with_name(
-            "arf_sample.R"
-        )
-
-        command = [
-            "Rscript",
-            str(script_path),
-            str(fit_dir),
-            str(input_file),
-            str(output_file),
-            str(feature_idx),
-            str(n_resamples),
-            str(self._next_r_seed()),
-        ]
-
-        subprocess.run(
-            command,
-            check=True,
-        )
-
-        replacement_values = np.loadtxt(
-            output_file,
-            delimiter=",",
-        )
-        replacement_values = np.asarray(
-            replacement_values
-        ).reshape(-1)
-
-        expected_size = (
-            n_eval
-            * n_resamples
-        )
-
-        if replacement_values.size != expected_size:
-            raise RuntimeError(
-                "R returned an unexpected number "
-                "of ARF replacement samples."
-            )
-
-        replacement_values = replacement_values.reshape(
-            n_eval,
-            n_resamples,
-        )
-
-        return replacement_values

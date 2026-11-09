@@ -194,7 +194,7 @@ class Explainer:
                 X_eval=X_eval_batch,
                 feature_indices=[feature_idx],
                 n_resamples=n_resamples,
-                X_reference=self.X_background,
+                X_background=self.X_background,
             )
 
             for local_row, x in enumerate(X_eval_batch):

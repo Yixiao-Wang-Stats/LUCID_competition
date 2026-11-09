@@ -20,25 +20,18 @@ class CliqueSampler(Sampler):
         X_train = np.asarray(X_train)
 
         if X_train.ndim != 2:
-            raise ValueError(
-                "X_train must be a 2D array."
-            )
+            raise ValueError("X_train must be a 2D array.")
 
         feature_size = X_train.shape[1]
 
         if not 0 <= feature_idx < feature_size:
-            raise ValueError(
-                "feature_idx is out of range."
-            )
+            raise ValueError("feature_idx is out of range.")
 
         if self.feature_size is None:
             self.feature_size = feature_size
 
         elif self.feature_size != feature_size:
-            raise ValueError(
-                "X_train has a different number of features "
-                "from previous fitted data."
-            )
+            raise ValueError("X_train has a different number of features from previous fitted data.")
 
         self.training_features[feature_idx] = X_train[:, feature_idx].copy()
         self.feature_types[feature_idx] = feature_type
@@ -51,34 +44,24 @@ class CliqueSampler(Sampler):
         x,
         feature_idx,
         n_resamples,
-        X_reference:np.ndarray,
+        X_background:np.ndarray,
     ):
         if not self.is_fitted:
-            raise RuntimeError(
-                "Sampler must be fitted before sampling."
-            )
+            raise RuntimeError("Sampler must be fitted before sampling.")
 
         if feature_idx not in self.training_features:
-            raise RuntimeError(
-                "The sampler has not been fitted for this feature."
-            )
+            raise RuntimeError("The sampler has not been fitted for this feature.")
 
         if n_resamples <= 0:
-            raise ValueError(
-                "n_resamples must be positive."
-            )
+            raise ValueError("n_resamples must be positive.")
 
         x = np.asarray(x)
 
         if x.ndim != 1:
-            raise ValueError(
-                "x must be a 1D feature vector."
-            )
+            raise ValueError("x must be a 1D feature vector.")
 
         if len(x) != self.feature_size:
-            raise ValueError(
-                "x has the wrong number of features."
-            )
+            raise ValueError("x has the wrong number of features.")
 
         training_feature = self.training_features[feature_idx]
         probabilities = np.linspace(
@@ -106,36 +89,26 @@ class CliqueSampler(Sampler):
         X_eval,
         feature_indices,
         n_resamples,
-        X_reference=None,
+        X_background=None,
     ):
         if not self.is_fitted:
-            raise RuntimeError(
-                "Sampler must be fitted before sampling."
-            )
+            raise RuntimeError("Sampler must be fitted before sampling.")
 
         X_eval = np.asarray(X_eval)
 
         if X_eval.ndim != 2:
-            raise ValueError(
-                "X_eval must be a 2D array."
-            )
+            raise ValueError("X_eval must be a 2D array.")
 
         if X_eval.shape[1] != self.feature_size:
-            raise ValueError(
-                "X_eval has the wrong number of features."
-            )
+            raise ValueError("X_eval has the wrong number of features.")
 
         feature_indices = np.asarray(feature_indices)
 
         if feature_indices.ndim != 1:
-            raise ValueError(
-                "feature_indices must be a 1D array."
-            )
+            raise ValueError("feature_indices must be a 1D array.")
 
         if n_resamples <= 0:
-            raise ValueError(
-                "n_resamples must be positive."
-            )
+            raise ValueError("n_resamples must be positive.")
 
         n_eval = X_eval.shape[0]
         selected_feature_size = len(feature_indices)
@@ -150,9 +123,7 @@ class CliqueSampler(Sampler):
 
         for local_j, feature_idx in enumerate(feature_indices):
             if feature_idx not in self.training_features:
-                raise RuntimeError(
-                    "The sampler has not been fitted for this feature."
-                )
+                raise RuntimeError("The sampler has not been fitted for this feature.")
 
             training_feature = self.training_features[feature_idx]
             probabilities = np.linspace(

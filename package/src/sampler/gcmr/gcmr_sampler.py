@@ -54,27 +54,20 @@ class GCMRSampler(Sampler):
         X_train = np.asarray(X_train)
 
         if X_train.ndim != 2:
-            raise ValueError(
-                "X_train must be a 2D array."
-            )
+            raise ValueError("X_train must be a 2D array.")
         
         feature_size = X_train.shape[1]
 
         if not 0 <= feature_idx < feature_size:
-            raise ValueError(
-                "feature_idx is out of range."
-            )
+            raise ValueError("feature_idx is out of range.")
 
         if self.feature_size is None:
             self.feature_size = feature_size
 
         elif self.feature_size != feature_size:
-            raise ValueError(
-                "X_train has a different number of features "
-                "from previous fitted data."
-            )
+            raise ValueError("X_train has a different number of features from previous fitted data.")
         
-        # fit model on z_-j
+        # fit model on z_-j, where z_j is the Gaussian-transformed feature j
         self.X_train = X_train
         Z_train = np.empty_like(X_train, dtype=float)
         for j in range(feature_size):
@@ -92,103 +85,50 @@ class GCMRSampler(Sampler):
         self.is_fitted = True
 
         return self
-    
-    def sample(
-        self,
-        x,
-        feature_idx,
-        n_resamples,
-        X_reference=None,
-    ):
-        return self.sample_batch(
-            X_eval=np.asarray(x)[None, :],
-            feature_indices=[feature_idx],
-            n_resamples=n_resamples,
-            X_reference=X_reference,
-        )[0, 0]
 
-    # rewrite sample batch, since for each batch we do not want predict for each samples!
     def sample_batch(
         self,
         X_eval,
         feature_indices,
         n_resamples,
-        X_reference=None,
+        X_background=None,
     ):
         if not self.is_fitted:
-            raise RuntimeError(
-                "Sampler must be fitted before sampling."
-            )
+            raise RuntimeError("Sampler must be fitted before sampling.")
 
+        X_eval, feature_indices, samples = self._prepare_sampling(
+            X_eval,
+            feature_indices,
+            n_resamples,
+            n_features=self.feature_size,
+        )
+        n_eval = len(X_eval)
 
-        X_eval = np.asarray(X_eval)
+        X_background = np.asarray(X_background)
 
-        if X_eval.ndim != 2:
-            raise ValueError(
-                "X_eval must be a 2D array."
-            )
+        if X_background.ndim != 2:
+            raise ValueError("X_background must be a 2D array.")
 
-
-        if X_eval.shape[1] != self.feature_size:
-            raise ValueError(
-                "X_eval has the wrong number of features."
-            )
-
-
-        feature_indices = np.asarray(feature_indices)
-
-        if feature_indices.ndim != 1:
-            raise ValueError(
-                "feature_indices must be a 1D array."
-            )
-
-
-        if n_resamples <= 0:
-            raise ValueError(
-                "n_resamples must be positive."
-            )
-
-
-        X_reference = np.asarray(X_reference)
-
-        if X_reference.ndim != 2:
-            raise ValueError(
-                "X_reference must be a 2D array."
-            )
-
-
-        if X_reference.shape[1] != self.feature_size:
-            raise ValueError(
-                "X_reference has the wrong number of features."
-            )
-
-
-        n_eval = X_eval.shape[0]
-        selected_feature_size = len(feature_indices)
-        samples = np.empty(
-                (n_eval, selected_feature_size, n_resamples)
-            )
+        if X_background.shape[1] != self.feature_size:
+            raise ValueError("X_background has the wrong number of features.")
         # transform evaluation sample to Gaussian space
         gaussian_X_eval = np.empty_like(X_eval,dtype=float)
-        # transform reference sample to Gaussian space
-        gaussian_X_reference = np.empty_like(X_reference,dtype=float)
+        # transform X_background sample to Gaussian space
+        gaussian_X_background = np.empty_like(X_background,dtype=float)
         for j in range(self.feature_size):
             gaussian_X_eval[:, j] = _to_gaussian_with_empirical_distribution_reference(
                 X_eval[:, j],
                 self.X_train[:, j],
             )
 
-            gaussian_X_reference[:, j] = _to_gaussian_with_empirical_distribution_reference(
-                X_reference[:, j],
+            gaussian_X_background[:, j] = _to_gaussian_with_empirical_distribution_reference(
+                X_background[:, j],
                 self.X_train[:, j],
             )
         
-
         for local_j, feature_idx in enumerate(feature_indices):
             if feature_idx not in self.models:
-                raise RuntimeError(
-                    "The sampler has not been fitted for this feature."
-                )
+                raise RuntimeError("The sampler has not been fitted for this feature.")
 
             model = self.models[feature_idx]
             
@@ -196,9 +136,9 @@ class GCMRSampler(Sampler):
             gaussian_X_eval_minus_j = np.delete(gaussian_X_eval,feature_idx,axis=1,)
             conditional_mean_evaluation = model.predict(gaussian_X_eval_minus_j)  # shape (n_eval,)
             # calculate residual pool on the reference dataset
-            gaussian_X_reference_minus_j = np.delete(gaussian_X_reference, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
-            conditional_mean_reference = model.predict(gaussian_X_reference_minus_j)  # shape (n_eval,)
-            reference_residuals = gaussian_X_reference[:, feature_idx]-conditional_mean_reference
+            gaussian_X_background_minus_j = np.delete(gaussian_X_background, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
+            conditional_mean_reference = model.predict(gaussian_X_background_minus_j)  # shape (n_eval,)
+            reference_residuals = gaussian_X_background[:, feature_idx]-conditional_mean_reference
             sampled_residuals = self.rng.choice(reference_residuals,size=(n_eval,n_resamples,),replace=True,)  # shape (n_eval, n_resamples)
 
             gaussian_replacement_values = (conditional_mean_evaluation[:, None]+ sampled_residuals) # shape (n_eval, n_resamples)

@@ -55,7 +55,6 @@ sample_arf <- function(
             x[[j]] <- as.numeric(x[[j]])
         }
     }
-
     
     conditioning_indices <- setdiff(seq_len(feature_size),target_idx_r)  # remaining feature indices
 

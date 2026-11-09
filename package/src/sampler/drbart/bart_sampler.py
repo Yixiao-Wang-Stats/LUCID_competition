@@ -242,7 +242,7 @@ class BartSampler(Sampler):
         return self
 
         
-    def sample(self, x, feature_idx, n_resamples, X_reference=None):
+    def sample(self, x, feature_idx, n_resamples, X_background=None):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
         if feature_idx not in self.fits:
@@ -347,7 +347,7 @@ class BartSampler(Sampler):
         X_eval,
         feature_indices,
         n_resamples,
-        X_reference=None,
+        X_background=None,
     ):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
@@ -421,7 +421,7 @@ class BartSampler(Sampler):
         feature_indices,
         n_resamples,
         posterior_id,
-        X_reference=None,
+        X_background=None,
     ):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")

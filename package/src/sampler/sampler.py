@@ -20,60 +20,97 @@ class Sampler(ABC):
 
         Some samplers may not require fitting.
         """
-        # drbart train CDE
-        # arf train CDE
-        # cs_pfi train transformation tree
-        # cmr and gcmr train mean
-        # clique train a grid
-        # permutation fake.
+        # TabPFN: fit a CDE.
+        # DRBART: fit a CDE.
+        # ARF: fit a joint distribution model used for CDE.
+        # CSPFI: fit a transformation tree for subgroup-based resampling.
+        # CMR/GCMR: fit conditional mean models.
+        # Permutation: no model fitting; sample empirical marginals.
         pass
 
     @abstractmethod
-    def sample(
-        self,
-        x,
-        feature_idx,
-        n_resamples,
-        X_reference=None,
-    ):
-        """
-        Generate replacement values for one observation
-        and one feature.
-
-        Returns
-        -------
-        replacements : ndarray of shape (n_resamples,)
-        """
-        pass
-    
     def sample_batch(
         self,
         X_eval,
         feature_indices,
         n_resamples,
-        X_reference=None,
+        X_background=None,
     ):
-        X_eval = np.asarray(X_eval)
-        feature_indices = np.asarray(feature_indices)
+        """Generate replacement values for evaluation observations.
 
-        n_eval = X_eval.shape[0]
-        feature_size = len(feature_indices)
-
-        samples = np.empty(
-            (n_eval, feature_size, n_resamples)
-        )
-
-        for i, x in enumerate(X_eval):
-            for local_j, feature_idx in enumerate(feature_indices):
-                samples[i, local_j] = self.sample(
-                    x=x,
-                    feature_idx=feature_idx,
-                    n_resamples=n_resamples,
-                    X_reference=X_reference,
-                )
-
-        return samples  # (n_eval, n_selected_features, n_resamples)
+        Returns
+        -------
+        replacement_values : ndarray
+            Shape (n_eval, n_selected_features, n_resamples).
+            The middle axis follows the order of `feature_indices`.
+        """
+        pass
     
+    @staticmethod
+    def _resolve_feature_bounds(
+        X_background,
+        feature_types,
+        bounds=None,
+        padding=0.1,
+    ):
+        """Resolve explicit or background-derived continuous feature bounds."""
+        X_background = np.asarray(X_background)
+        bounds = {} if bounds is None else bounds
+        resolved = {}
+
+        for feature_idx, feature_type in enumerate(feature_types):
+            if feature_type != "continuous":
+                continue
+
+            if feature_idx in bounds:
+                lower, upper = bounds[feature_idx]
+            else:
+                values = X_background[:, feature_idx]
+                observed_lower = float(values.min())
+                observed_upper = float(values.max())
+
+                # A small fallback gives constant features a nonzero interval.
+                width = max(
+                    observed_upper - observed_lower,
+                    1e-8 * max(
+                        1.0, abs(observed_lower), abs(observed_upper)
+                    ),
+                )
+                lower = observed_lower - padding * width
+                upper = observed_upper + padding * width
+
+            if not np.isfinite([lower, upper]).all() or lower >= upper:
+                raise ValueError(f"Invalid bounds for feature {feature_idx}.")
+
+            resolved[feature_idx] = (float(lower), float(upper))
+
+        return resolved
 
     def _next_r_seed(self):
         return int(self.rng.integers(0,2**31 - 1))
+
+    def _prepare_sampling(
+        self,
+        X_eval,
+        feature_indices,
+        n_resamples,
+        n_features,
+    ):
+        """Validate sampling inputs and allocate the replacement array."""
+        X_eval = np.asarray(X_eval)
+        if X_eval.ndim != 2:
+            raise ValueError("X_eval must be a 2D array.")
+        if X_eval.shape[1] != n_features:
+            raise ValueError("X_eval has the wrong number of features.")
+
+        feature_indices = np.asarray(feature_indices)
+        if feature_indices.ndim != 1:
+            raise ValueError("feature_indices must be a 1D array.")
+
+        if n_resamples <= 0:
+            raise ValueError("n_resamples must be positive.")
+
+        samples = np.empty(
+            (len(X_eval), len(feature_indices), n_resamples)
+        )
+        return X_eval, feature_indices, samples
