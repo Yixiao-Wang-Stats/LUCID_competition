@@ -9,6 +9,7 @@ predict_mu_sigma <- function(
     posterior_id,
     u
 ) {
+    # This function predicts the mean and standard deviation for a given posterior draw and given x and u.
     x <- as.matrix(x)
     mean_input <- cbind(u, x)
     mu <- as.numeric(mean_trees$predict_i(t(mean_input), posterior_id - 1L))  # predict mean from i-th posterior
@@ -82,8 +83,8 @@ truncated_distribution_sampler <- function(fit,mean_trees,prec_trees,x,posterior
 
     # suppose p(z) = \sum_k w_k f_k(z)
     # p(z | z \in bounds) = p(z)1{z \in buonds} / p(z \in bounds)
-    # = \sum_{k} w_k f_k(z) 1{z \in buonds} / \sum_{j} w_j f_j(z)
-    # = \sum_{k} (f_k(z) 1{z \in buonds} / A_k) * (w_k A_k / \sum_{j} w_j f_j(z))
+    # = \sum_{k} w_k f_k(z) 1{z \in buonds} / \sum_{j} w_j A_j
+    # = \sum_{k} (f_k(z) 1{z \in buonds} / A_k) * (w_k A_k / \sum_{j} w_j A_j)
     # = \sum_{k} f_k(z | z\in bounds) * w_k^*
     # = \sum_{k} w_k^*  *  f_k(z | z\in bounds) 
 
@@ -92,9 +93,15 @@ truncated_distribution_sampler <- function(fit,mean_trees,prec_trees,x,posterior
         stop("Truncated distribution requires finite increasing bounds.")
     }
     cuts <- c(0,fit$fit$ucuts[[posterior_id]],1)
-    # for ux mode, we should also save the cuts for precision
+    # for ux mode, we should also save the cuts for precision, 
+    # since precision is also depends on u.
+    # Thus we need union of the mean-tree and precision-tree cuts.
     if (fit$variance == "ux") {
-        # Include every precision u cut, even if absent from the mean-tree cuts.
+        # prec_file structure is looks like:
+        # Number of dimensions
+        # Number of u cuts
+        # ... u cuts...
+        # Number of cuts for conditioning feature ...    
         connection <- file(fit$prec_file,"r")
         on.exit(close(connection),add=TRUE)
         header <- scan(connection,nmax=2L,quiet=TRUE)
@@ -105,9 +112,11 @@ truncated_distribution_sampler <- function(fit,mean_trees,prec_trees,x,posterior
     cuts <- sort(unique(cuts))
     if (any(!is.finite(cuts)) || any(cuts < 0 | cuts > 1)) stop("Invalid posterior u cuts.")
     widths <- diff(cuts)
-    mids <- head(cuts,-1L) + widths/2
+    mids <- head(cuts,-1L) + widths/2  # use (mids, x) to determine the mean and std.
 
     # This is the function returning the log A_k
+    # A_k = \Phi((bounds[2L]-mu)/sigma) - \Phi((bounds[1L]-mu)/sigma)
+    # For component k, what is the log fraction of its probability lies between L and u.
     interval_log_mass <- function(mu,sigma) {
         a <- (bounds[1L]-mu)/sigma
         b <- (bounds[2L]-mu)/sigma
@@ -124,33 +133,6 @@ truncated_distribution_sampler <- function(fit,mean_trees,prec_trees,x,posterior
         result
     }
     
-    # sample from f_k(z | z\in bounds)
-    # this function is a standard truncated normal sampler. Specific implementation should not be matter here.
-    truncated_normal <- function(mu,sigma,lower,upper) {
-        a <- (lower-mu)/sigma
-        b <- (upper-mu)/sigma
-        if ((upper-lower)/sigma * (1+min(abs(a),abs(b))) < 1) {
-            peak <- min(max(mu,lower),upper)  
-            repeat {
-                candidate <- runif(1L,lower,upper)  
-                log_ratio <- -0.5*((candidate-peak)/sigma)*((candidate+peak-2*mu)/sigma)
-                if (log(runif(1L)) <= log_ratio) return(candidate)
-            }
-        }
-        if (b < 0) return(-truncated_normal(-mu,sigma,-upper,-lower))
-        if (a > 0) {
-            rate <- a/2 + sqrt((a/2)^2+1)
-            repeat {
-                offset <- -log1p(-runif(1L)*(-expm1(-rate*((upper-lower)/sigma))))/rate
-                z <- a+offset
-                if (log(runif(1L)) <= -0.5*(z-rate)^2) {
-                    return(min(upper,max(lower,lower+sigma*offset)))
-                }
-            }
-        }
-        z <- qnorm(runif(1L,pnorm(a),pnorm(b)))
-        min(upper,max(lower,mu+sigma*z))
-    }
     replacement <- numeric(nrow(x))
     mixtures <- new.env(parent=emptyenv())
     for (row in seq_len(nrow(x))) {
@@ -174,9 +156,15 @@ truncated_distribution_sampler <- function(fit,mean_trees,prec_trees,x,posterior
         # sample a component from w_k*
         component <- sample.int(length(mids),1L,prob=parameters$weights)
         # then since already sampled from w_k* and component is k, we only need to sample from f_k(z | z\in bounds)
-        replacement[row] <- truncated_normal(parameters$mu[component],parameters$sigma[component],bounds[1L],bounds[2L])
+        replacement[row] <- truncnorm::rtruncnorm(
+            n = 1L,
+            a = bounds[1L],
+            b = bounds[2L],
+            mean = parameters$mu[component],
+            sd = parameters$sigma[component]
+        )
     }
-    replacement
+    replacement  # shape (nrow(x),). Returns one replacement per row of x.
 }
 
 
@@ -187,15 +175,17 @@ sample_given_single_posterior <- function(
     prec_trees,
     x,
     posterior_id,
-    n_resamples
+    n_resamples,
+    bounds = NULL,
+    feature_label = "<unspecified>",
+    fit_dir = "<unspecified>"
 ) {
     # First, we get the posterior_id
     x <- as.matrix(x)
-    # x_repeat <- x[rep(1:nrow(x), each = n_resamples), , drop = FALSE]  # sample x with replacement for n_resamples times
     x_repeat <- x[rep(seq_len(nrow(x)), each = n_resamples), , drop = FALSE]
     replacement <- numeric(nrow(x_repeat))
     pending <- seq_len(nrow(x_repeat))
-    # try fit 10000 times 
+    # try fit 10000 times sampling, if the candidate is within bounds, keep it. Otherwise, use the truncated distribution sampler.
     for (attempt in seq_len(if (is.null(bounds)) 1L else 10000L)) {
         u <- runif(length(pending))
         parameters <- predict_mu_sigma(fit,mean_trees,prec_trees,x_repeat[pending,,drop=FALSE],posterior_id,u)
@@ -222,15 +212,12 @@ sample_posterior_for_lucid <- function(
     mean_trees,
     prec_trees,
     x,
-    n_resamples
+    n_resamples,
+    bounds = NULL,
+    feature_label = "<unspecified>",
+    fit_dir = "<unspecified>"
 ) {
     posterior_count <- length(fit$fit$ucuts)
-    # posterior_ids <- sample.int(
-    #     posterior_count,
-    #     n_resamples,
-    #     replace = TRUE
-    # )
-    # replacement <- numeric(n_resamples)
     n_eval <- nrow(x)
     total_sample_size <- n_eval * n_resamples
     posterior_ids <- sample.int(
@@ -248,7 +235,10 @@ sample_posterior_for_lucid <- function(
             prec_trees = prec_trees,
             x = x_repeat[positions, , drop = FALSE],
             posterior_id = posterior_id,
-            n_resamples = 1
+            n_resamples = 1,
+            bounds = bounds,
+            feature_label = feature_label,
+            fit_dir = fit_dir
         )
         replacement[positions] <- current_replacement
     }
@@ -267,7 +257,10 @@ sample_fixed_posterior_for_credible_interval <- function(
     prec_trees,
     x,
     posterior_id,
-    n_resamples
+    n_resamples,
+    bounds = NULL,
+    feature_label = "<unspecified>",
+    fit_dir = "<unspecified>"
 ) {
     n_eval <- nrow(x)
     replacement <- sample_given_single_posterior(
@@ -276,7 +269,10 @@ sample_fixed_posterior_for_credible_interval <- function(
         prec_trees = prec_trees,
         x = x,
         posterior_id = posterior_id,
-        n_resamples = n_resamples
+        n_resamples = n_resamples,
+        bounds = bounds,
+        feature_label = feature_label,
+        fit_dir = fit_dir
     )
     matrix(
         replacement,
@@ -329,7 +325,10 @@ if (mode == "lucid") {
         mean_trees = trees$mean,
         prec_trees = trees$prec,
         x = x,
-        n_resamples = n_resamples
+        n_resamples = n_resamples,
+        bounds = bounds,
+        feature_label = feature_label,
+        fit_dir = fit_dir
     )
 } else {
     posterior_id <- as.integer(args[[7L]])
@@ -343,7 +342,10 @@ if (mode == "lucid") {
         prec_trees = trees$prec,
         x = x,
         posterior_id = posterior_id,
-        n_resamples = n_resamples
+        n_resamples = n_resamples,
+        bounds = bounds,
+        feature_label = feature_label,
+        fit_dir = fit_dir
     )
 }
 
@@ -358,67 +360,3 @@ write.table(
 
 
 
-
-
-# # test
-# output_dir <- "results/tests/test_package/test_drbart"
-# fit <- load_drbart_fit(output_dir)
-# trees <- load_drbart_trees(fit)
-
-# print(class(fit))
-# print(fit$variance)
-# print(is.null(trees$mean))
-# print(is.null(trees$prec))
-
-# x <- matrix(c(0.2, -0.5), nrow = 1)
-# u <- 0.3
-# posterior_id <- 1
-
-# parameters <- predict_mu_sigma(
-#     fit = fit,
-#     mean_trees = trees$mean,
-#     prec_trees = trees$prec,
-#     x = x,
-#     posterior_id = posterior_id,
-#     u = u
-# )
-
-# print(parameters$mu)
-# print(parameters$sigma)
-
-# set.seed(2026)
-
-# replacement <- sample_given_single_posterior(
-#     fit = fit,
-#     mean_trees = trees$mean,
-#     prec_trees = trees$prec,
-#     x = x,
-#     posterior_id = 1,
-#     n_resamples = 10
-# )
-
-# print(replacement)
-# print(length(replacement))
-
-# replacement_marginal <- sample_posterior_for_lucid(
-#     fit = fit,
-#     mean_trees = trees$mean,
-#     prec_trees = trees$prec,
-#     x = x,
-#     n_resamples = 10
-# )
-
-# print(replacement_marginal)
-# print(length(replacement_marginal))
-
-# replacement_fixed <- sample_fixed_posterior_for_credible_interval(
-#     fit = fit,
-#     mean_trees = trees$mean,
-#     prec_trees = trees$prec,
-#     x = x,
-#     posterior_id = 1,
-#     n_resamples = 10
-# )
-
-# print(replacement_fixed)
-# print(length(replacement_fixed))

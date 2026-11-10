@@ -1,50 +1,30 @@
 import numpy as np
 from ..sampler import Sampler
 
-class PermutationSampler(Sampler):
-    def fit(self,X_train=None,feature_idx=None,feature_type=None,):
-        # No fitting is required for permutation.
-        self.is_fitted = True
-        return self
-    
-    def sample_batch(
-        self,
-        X_eval,
-        feature_indices,
-        n_resamples,
-        X_background=None,
-    ):
-        """Draw replacements from empirical marginal distributions.
 
-        Evaluation feature values do not affect the distribution.
-        Each observation receives separate draws from the selected
-        background columns.
-        """
-        X_eval = np.asarray(X_eval)
+class PermutationSampler(Sampler):
+    """Draw replacements from empirical background marginals."""
+
+    def _fit_feature(self, X_train, feature_idx, feature_type):
+        # No model estimation is needed; the base class registers the feature.
+        return None
+
+    def _sample_feature(
+        self,
+        fitted_model,
+        X_eval,
+        feature_idx,
+        n_resamples,
+        X_background,
+    ):
         X_background = np.asarray(X_background)
         if X_background.ndim != 2:
             raise ValueError("X_background must be a 2D array.")
+        if X_background.shape[1] != self.feature_size:
+            raise ValueError("X_background has the wrong number of features.")
 
-        X_eval, feature_indices, replacement_values = self._prepare_sampling(
-            X_eval,
-            feature_indices,
-            n_resamples,
-            n_features=X_background.shape[1],
+        return self.rng.choice(
+            X_background[:, feature_idx],
+            size=(len(X_eval), n_resamples),
+            replace=True,
         )
-
-        for feature_idx in feature_indices:
-            if not 0 <= feature_idx < X_background.shape[1]:
-                raise ValueError("feature_idx is out of range.")
-
-        n_eval = len(X_eval)
-
-        # Preserve the previous observation-then-feature draw order.
-        for row in range(n_eval):
-            for local_j, feature_idx in enumerate(feature_indices):
-                replacement_values[row, local_j] = self.rng.choice(
-                    X_background[:, feature_idx],
-                    size=n_resamples,
-                    replace=True,
-                )
-
-        return replacement_values

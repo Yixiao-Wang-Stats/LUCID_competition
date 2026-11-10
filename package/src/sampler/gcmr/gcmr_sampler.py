@@ -1,7 +1,5 @@
 import numpy as np
-
 from scipy.stats import norm
-
 from ..sampler import Sampler
 
 #  We first write two helper functions from X_eval to Gaussian copula.
@@ -41,98 +39,102 @@ class GCMRSampler(Sampler):
         predictive_model_kwargs=None,
         random_state=None,
     ):
-        super().__init__(feature_types=feature_types, random_state=random_state)
-        self.predictive_model_class = predictive_model_class
-        if predictive_model_kwargs is None:
-            predictive_model_kwargs = {}
-        self.predictive_model_kwargs = predictive_model_kwargs
-        self.models = {}
-        self.residuals = {}
-        self.X_train = None
-
-    def fit(self, X_train, feature_idx, feature_type=None,):
-        X_train = self._prepare_fitting(X_train, feature_idx, feature_type)
-        feature_size = X_train.shape[1]
-        # fit model on z_-j, where z_j is the Gaussian-transformed feature j
-        self.X_train = X_train
-        Z_train = np.empty_like(X_train, dtype=float)
-        for j in range(feature_size):
-            Z_train[:, j] = _to_gaussian_with_empirical_distribution_reference(
-                X_train[:, j],
-                X_train[:, j],
-            )
-        Z_minus_j = np.delete(Z_train, feature_idx, axis=1)
-        Z_j = Z_train[:, feature_idx]
-
-        model = self.predictive_model_class(**self.predictive_model_kwargs)
-        model.fit(Z_minus_j, Z_j)
-        
-        self.models[feature_idx] = model
-        self.is_fitted = True
-
-        return self
-
-    def sample_batch(
-        self,
-        X_eval,
-        feature_indices,
-        n_resamples,
-        X_background=None,
-    ):
-        if not self.is_fitted:
-            raise RuntimeError("Sampler must be fitted before sampling.")
-
-        X_eval, feature_indices, samples = self._prepare_sampling(
-            X_eval,
-            feature_indices,
-            n_resamples,
-            n_features=self.feature_size,
+        super().__init__(
+            feature_types=feature_types,
+            random_state=random_state,
         )
-        n_eval = len(X_eval)
 
+        self.predictive_model_class = predictive_model_class
+        self.predictive_model_kwargs = (
+            {} if predictive_model_kwargs is None
+            else predictive_model_kwargs
+        )
+        self.X_train = None  # Store the training data for empirical distribution references, which are used in _sample_feature.
+
+    def _fit_feature(self, X_train, feature_idx, feature_type):
+        self.X_train = X_train
+
+        Z_train = np.empty_like(X_train, dtype=float)
+        for j in range(self.feature_size):
+            Z_train[:, j] = (
+                _to_gaussian_with_empirical_distribution_reference(
+                    X_train[:, j],
+                    X_train[:, j],
+                )
+            )
+
+        Z_minus_j_train = np.delete(Z_train, feature_idx, axis=1)
+        Z_j_train = Z_train[:, feature_idx]
+
+        model = self.predictive_model_class(
+            **self.predictive_model_kwargs
+        )
+        model.fit(Z_minus_j_train, Z_j_train)
+        return model
+
+    def _sample_feature(
+        self,
+        fitted_model,
+        X_eval,
+        feature_idx,
+        n_resamples,
+        X_background,
+    ):
         X_background = np.asarray(X_background)
-
         if X_background.ndim != 2:
             raise ValueError("X_background must be a 2D array.")
-
         if X_background.shape[1] != self.feature_size:
             raise ValueError("X_background has the wrong number of features.")
-        # transform evaluation sample to Gaussian space
-        gaussian_X_eval = np.empty_like(X_eval,dtype=float)
-        # transform X_background sample to Gaussian space
-        gaussian_X_background = np.empty_like(X_background,dtype=float)
+
+        # Anchor both transformations to the training marginals.
+        gaussian_X_eval = np.empty_like(X_eval, dtype=float)
+        gaussian_X_background = np.empty_like(
+            X_background, dtype=float
+        )
+
         for j in range(self.feature_size):
-            gaussian_X_eval[:, j] = _to_gaussian_with_empirical_distribution_reference(
-                X_eval[:, j],
-                self.X_train[:, j],
+            gaussian_X_eval[:, j] = (
+                _to_gaussian_with_empirical_distribution_reference(
+                    X_eval[:, j],
+                    self.X_train[:, j],
+                )
+            )
+            gaussian_X_background[:, j] = (
+                _to_gaussian_with_empirical_distribution_reference(
+                    X_background[:, j],
+                    self.X_train[:, j],
+                )
             )
 
-            gaussian_X_background[:, j] = _to_gaussian_with_empirical_distribution_reference(
-                X_background[:, j],
-                self.X_train[:, j],
-            )
-        
-        for local_j, feature_idx in enumerate(feature_indices):
-            if feature_idx not in self.models:
-                raise RuntimeError("The sampler has not been fitted for this feature.")
+        gaussian_X_eval_minus_j = np.delete(
+            gaussian_X_eval, feature_idx, axis=1
+        )
+        conditional_mean_evaluation = fitted_model.predict(
+            gaussian_X_eval_minus_j
+        )
 
-            model = self.models[feature_idx]
-            
-            # predict conditional mean for the whole evaluation batch
-            gaussian_X_eval_minus_j = np.delete(gaussian_X_eval,feature_idx,axis=1,)
-            conditional_mean_evaluation = model.predict(gaussian_X_eval_minus_j)  # shape (n_eval,)
-            # calculate residual pool on the reference dataset
-            gaussian_X_background_minus_j = np.delete(gaussian_X_background, feature_idx, axis=1)  # shape (n_eval, feature_size-1)
-            conditional_mean_reference = model.predict(gaussian_X_background_minus_j)  # shape (n_eval,)
-            reference_residuals = gaussian_X_background[:, feature_idx]-conditional_mean_reference
-            sampled_residuals = self.rng.choice(reference_residuals,size=(n_eval,n_resamples,),replace=True,)  # shape (n_eval, n_resamples)
+        gaussian_X_background_minus_j = np.delete(
+            gaussian_X_background, feature_idx, axis=1
+        )
+        conditional_mean_background = fitted_model.predict(
+            gaussian_X_background_minus_j
+        )
+        residuals = (
+            gaussian_X_background[:, feature_idx]
+            - conditional_mean_background
+        )
+        sampled_residuals = self.rng.choice(
+            residuals,
+            size=(len(X_eval), n_resamples),
+            replace=True,
+        )
 
-            gaussian_replacement_values = (conditional_mean_evaluation[:, None]+ sampled_residuals) # shape (n_eval, n_resamples)
-            replacement_values = _from_gaussian_with_empirical_distribution_reference(
-                gaussian_replacement_values,
-                self.X_train[:, feature_idx],
-            )
+        gaussian_replacement_values = (
+            conditional_mean_evaluation[:, None]
+            + sampled_residuals
+        )
 
-            samples[:, local_j, :] = replacement_values
-
-        return samples
+        return _from_gaussian_with_empirical_distribution_reference(
+            gaussian_replacement_values,
+            self.X_train[:, feature_idx],
+        )

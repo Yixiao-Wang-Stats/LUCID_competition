@@ -81,32 +81,29 @@ class TabPFNSampler(Sampler):
             else _SharedTabPFNModel()
         )
 
-    def fit(self, X_train, feature_idx, feature_type=None):
-        X = self._prepare_fitting(
-            np.asarray(X_train, dtype=float),
-            feature_idx,
-            feature_type=feature_type,
-        )
-        feature_type = self.feature_types[feature_idx]
-        
-        self.feature_idx = feature_idx
-        self.feature_type = feature_type
+    def _fit_feature(self, X_train, feature_idx, feature_type):
+        X = np.asarray(X_train, dtype=float)
         context = np.delete(X, feature_idx, axis=1)
         target = X[:, feature_idx]
-        self._constant = None
 
-        if feature_type not in {"continuous", "binary", "categorical"}:
-            raise ValueError("Unknown feature type.")
-
+        classes = None
         categorical = feature_type != "continuous"
-        if categorical:
-            self.classes_, target = np.unique(target, return_inverse=True)
-            if len(self.classes_) == 1:
-                self._constant = self.classes_[0]
-                self.is_fitted = True
-                return self
 
-        options = {"random_state": self.random_state, **self.model_kwargs}
+        if categorical:
+            classes, target = np.unique(
+                target, return_inverse=True
+            )
+            if len(classes) == 1:
+                return {
+                    "model": None,
+                    "classes": classes,
+                    "constant": classes[0],
+                }
+
+        options = {
+            "random_state": self.random_state,
+            **self.model_kwargs,
+        }
         version = self.version
 
         if self.backend == "local":
@@ -117,92 +114,116 @@ class TabPFNSampler(Sampler):
             options.setdefault("device", self.device)
             options.setdefault("fit_mode", "fit_with_cache")
             options.setdefault("show_progress_bar", False)
-            # Feature-level threads provide the parallelism.
             options.setdefault("n_jobs", 1)
+
         elif self.backend == "hosted":
-            from tabpfn_client import TabPFNClassifier, TabPFNRegressor
+            from tabpfn_client import (
+                TabPFNClassifier,
+                TabPFNRegressor,
+            )
 
             options.setdefault(
                 "fit_mode",
                 "fit_preprocessors"
-                if self.version in {"v2.5", "v2.6"} else "fit_with_cache",
+                if self.version in {"v2.5", "v2.6"}
+                else "fit_with_cache",
             )
             options.setdefault("thinking_mode", False)
+
         else:
             raise ValueError("backend must be 'local' or 'hosted'.")
 
-        model_class = TabPFNClassifier if categorical else TabPFNRegressor
+        model_class = (
+            TabPFNClassifier if categorical else TabPFNRegressor
+        )
 
         if self.backend == "local":
             options["model_path"] = self._shared_model.get_specs(
                 model_class, version, options
             )
 
-        self.model_ = model_class.create_default_for_version(
-            version=version, **options
+        model = model_class.create_default_for_version(
+            version=version,
+            **options,
         )
-        self.model_.fit(context, target)
-        self.is_fitted = True
-        return self
+        model.fit(context, target)
 
-    def sample_batch(
-        self, X_eval, feature_indices,
-        n_resamples, X_background=None,
+        return {
+            "model": model,
+            "classes": classes,
+            "constant": None,
+        }
+
+    def _sample_feature(
+        self,
+        fitted_model,
+        X_eval,
+        feature_idx,
+        n_resamples,
+        X_background,
     ):
-        if not self.is_fitted:
-            raise RuntimeError("Sampler must be fitted before sampling.")
-
-        X_eval, feature_indices, samples = self._prepare_sampling(
-            X_eval,
-            feature_indices,
-            n_resamples,
-            n_features=self.feature_size,
-        )
-
-        if list(feature_indices) != [self.feature_idx]:
-            raise ValueError("Requested feature differs from fitted feature.")
-
         X = np.asarray(X_eval, dtype=float)
-        context = np.delete(X, self.feature_idx, axis=1)
 
-        if self._constant is not None:
-            samples.fill(self._constant)
-            return samples
+        if fitted_model["constant"] is not None:
+            return np.full(
+                (len(X), n_resamples),
+                fitted_model["constant"],
+                dtype=float,
+            )
+
+        context = np.delete(X, feature_idx, axis=1)
+        model = fitted_model["model"]
+        feature_type = self.feature_types[feature_idx]
+        replacement_values = np.empty(
+            (len(X), n_resamples)
+        )
 
         for start in range(0, len(X), self.batch_size):
             stop = min(start + self.batch_size, len(X))
             batch = context[start:stop]
 
-            if self.feature_type != "continuous":
-                probabilities = np.asarray(self.model_.predict_proba(batch))
-                labels = np.asarray(self.model_.classes_, dtype=int)
-                classes = self.classes_[labels]
+            if feature_type != "continuous":
+                probabilities = np.asarray(
+                    model.predict_proba(batch)
+                )
+                labels = np.asarray(model.classes_, dtype=int)
+                classes = fitted_model["classes"][labels]
+
                 for row, p in enumerate(probabilities):
-                    samples[start + row, 0] = self.rng.choice(
-                        classes, size=n_resamples, p=p / p.sum()
+                    replacement_values[start + row] = (
+                        self.rng.choice(
+                            classes,
+                            size=n_resamples,
+                            p=p / p.sum(),
+                        )
                     )
+
             else:
-                full = self.model_.predict(batch, output_type="full")
-                logits = torch.as_tensor(full["logits"]).detach().cpu().double()
+                full = model.predict(
+                    batch, output_type="full"
+                )
+                logits = (
+                    torch.as_tensor(full["logits"])
+                    .detach().cpu().double()
+                )
                 borders = (
                     full["criterion"].borders
-                    if "criterion" in full else full["borders"]
+                    if "criterion" in full
+                    else full["borders"]
                 )
-                borders = torch.as_tensor(borders).detach().cpu().double()
+                borders = (
+                    torch.as_tensor(borders)
+                    .detach().cpu().double()
+                )
                 criterion = FullSupportBarDistribution(borders)
-                samples[start:stop, 0] = self._draw(
-                    criterion, logits, n_resamples
+
+                replacement_values[start:stop] = self._draw(
+                    criterion,
+                    logits,
+                    n_resamples,
                 )
 
-        return samples  # (n_eval, n_selected_features, n_resamples)
-
-    def sample(
-        self, x, feature_idx, n_resamples, X_background=None,
-    ):
-        return self.sample_batch(
-            np.asarray(x)[None, :], [feature_idx],
-            n_resamples, X_background,
-        )[0, 0]
+        return replacement_values
 
     def _draw(self, criterion, logits, count):
         generator = torch.Generator(device="cpu")

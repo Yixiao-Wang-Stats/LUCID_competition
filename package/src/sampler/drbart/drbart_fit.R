@@ -58,8 +58,8 @@ drbart_fit <- function(
         prec_file = prec_file
     )
     saveRDS(fit, file=fit_file)
-    posterior_count <- length(fit$fit$ucuts)
-    writeLines(as.character(posterior_count),file.path(output_dir, "posterior_count.txt"))  # save the posterior count
+    posterior_count <- length(fit$fit$ucuts) 
+    writeLines(as.character(posterior_count),file.path(output_dir, "posterior_count.txt")) 
     invisible(fit)
 }
 

@@ -60,6 +60,7 @@ class Explainer:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._samplers = {}
+        self._arf_fit = None
         self._tabpfn_model = None
 
         if (
@@ -146,11 +147,17 @@ class Explainer:
         if feature_idx not in self._samplers:
             sampler = self._new_sampler()
 
+            if self.cde == "arf":
+                sampler._joint_fit = self._arf_fit
+
             sampler.fit(
                 self.X_background,
                 feature_idx=feature_idx,
                 feature_type=self.feature_types[feature_idx],
             )
+
+            if self.cde == "arf":
+                self._arf_fit = sampler.fits[feature_idx]
 
             self._samplers[feature_idx] = sampler
 
@@ -278,8 +285,14 @@ class Explainer:
             else:
                 backend = "loky"
                 parallel_options = {"inner_max_num_threads": 1}
+            
+            # Fit the shared ARF model before dispatching feature tasks.
+            if self.cde == "arf":
+                for feature_idx in feature_indices:
+                    self._get_sampler(feature_idx)
 
             with parallel_config(backend=backend, **parallel_options):
+                
                 results = Parallel(
                     n_jobs=n_workers,
                     temp_folder=str(self.output_dir),
@@ -332,3 +345,4 @@ class Explainer:
             self._temporary_directory.cleanup()
             self._temporary_directory = None
             self._samplers.clear()
+            self._arf_fit = None

@@ -26,81 +26,63 @@ class CSPFISampler(Sampler):
         self.seed = seed
         self.fit_script = Path(fit_script) if fit_script is not None else Path(__file__).with_name("cspfi_fit.R")
         self.sample_script = Path(sample_script) if sample_script is not None else Path(__file__).with_name("cspfi_sample.R")
-        self.feature_idx = None
-        self.fit_dir = None
 
-    def fit(
-        self,
-        X_train,
-        feature_idx,
-        feature_type=None,
-    ):
-        X_train = self._prepare_fitting(
-            X_train,
-            feature_idx,
-            feature_type=feature_type,
-        )
-        self.feature_idx = feature_idx
-        self.fit_dir = self.output_dir / f"feature_{feature_idx}"
-        self.fit_dir.mkdir(parents=True,exist_ok=True)
-        fit_file = self.fit_dir / "fit.rds"
-        X_train_file = self.fit_dir / "X_train.csv"
-        feature_types_file = self.fit_dir / "feature_types.txt"
-        np.savetxt(X_train_file,X_train,delimiter=",")
+
+    def _fit_feature(self, X_train, feature_idx, feature_type):
+        fit_dir = self.output_dir / f"feature_{feature_idx}"
+        fit_dir.mkdir(parents=True, exist_ok=True)
+
+        X_train_file = fit_dir / "X_train.csv"
+        feature_types_file = fit_dir / "feature_types.txt"
+
+        np.savetxt(X_train_file, X_train, delimiter=",")
         feature_types_file.write_text("\n".join(self.feature_types))
+
         subprocess.run(
             [
                 "Rscript",
                 str(self.fit_script),
                 str(X_train_file),
-                str(self.fit_dir),
+                str(fit_dir),
                 str(self.seed),
                 str(feature_types_file),
                 str(feature_idx),
             ],
             check=True,
         )
-        self.is_fitted = True
-        return self
+
+        return fit_dir
     
-    def sample_batch(
+    def _sample_feature(
         self,
+        fitted_model,
         X_eval,
-        feature_indices,
+        feature_idx,
         n_resamples,
-        X_background=None,
+        X_background,
     ):
-        if self.fit_dir is None:
-            raise RuntimeError("Sampler must be fitted before sampling.")
-
-        X_eval, feature_indices, samples = self._prepare_sampling(
-            X_eval,
-            feature_indices,
-            n_resamples,
-            n_features=len(self.feature_types),
-        )
-
-        if len(feature_indices) != 1:
-            raise ValueError("CSPFISampler supports one fitted feature at a time.")
-
-        if feature_indices[0] != self.feature_idx:
-            raise ValueError("Requested feature does not match the fitted feature.")
-
         X_background = np.asarray(X_background)
         if X_background.ndim != 2:
             raise ValueError("X_background must be a 2D array.")
 
-        temporary_dir = Path(tempfile.mkdtemp(dir=self.exchange_dir))
+        temporary_dir = Path(
+            tempfile.mkdtemp(
+                prefix=f"feature_{feature_idx}_",
+                dir=self.exchange_dir,
+            )
+        )
         X_eval_file = temporary_dir / "X_eval.csv"
         X_background_file = temporary_dir / "X_background.csv"
         output_file = temporary_dir / "samples.csv"
-        np.savetxt(X_eval_file,X_eval,delimiter=",")
-        np.savetxt(X_background_file,X_background,delimiter=",")
+
+        np.savetxt(X_eval_file, X_eval, delimiter=",")
+        np.savetxt(X_background_file, X_background, delimiter=",")
+
         subprocess.run(
             [
                 "Rscript",
                 str(self.sample_script),
-                str(self.fit_dir / "fit.rds"),
+                str(fitted_model / "fit.rds"),
                 str(X_eval_file),
                 str(X_background_file),
                 str(output_file),
@@ -109,9 +91,11 @@ class CSPFISampler(Sampler):
             ],
             check=True,
         )
-        replacement_values = np.loadtxt(output_file, delimiter=",")
-        samples[:, 0, :] = np.asarray(replacement_values).reshape(
+
+        replacement_values = np.loadtxt(
+            output_file, delimiter=","
+        )
+        return np.asarray(replacement_values).reshape(
             len(X_eval), n_resamples
         )
-        return samples
         

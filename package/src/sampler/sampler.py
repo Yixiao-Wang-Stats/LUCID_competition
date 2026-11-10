@@ -4,7 +4,7 @@
 # - 2. We generate replacement samples on the evaluation dataset, including residual permutation, permutation.
 
 
-from abc import ABC, abstractmethod
+from abc import ABC
 import numpy as np
 from pathlib import Path
 
@@ -25,40 +25,77 @@ class Sampler(ABC):
 
         self.feature_size = None
         self.is_fitted = False
+        self.fits = {}
 
-    @abstractmethod
-    def fit(self, X_train, feature_idx, feature_type=None,):
-        """
-        Fit the sampler using training data.
+    def fit(self, X_train, feature_idx, feature_type=None):
+        """Fit and retain the conditional sampler for one feature."""
+        X_train = self._prepare_fitting(
+            X_train,
+            feature_idx,
+            feature_type=feature_type,
+        )
+        feature_type = self.feature_types[feature_idx]
 
-        Some samplers may not require fitting.
-        """
-        # TabPFN: fit a CDE.
-        # DRBART: fit a CDE.
-        # ARF: fit a joint distribution model used for CDE.
-        # CSPFI: fit a transformation tree for subgroup-based resampling.
-        # CMR/GCMR: fit conditional mean models.
-        # Permutation: no model fitting; sample empirical marginals.
-        pass
+        fitted_model = self._fit_feature(
+            X_train,
+            feature_idx,
+            feature_type,
+        )
 
-    @abstractmethod
+        self.fits[feature_idx] = fitted_model
+        self.is_fitted = True
+        return self
+
     def sample_batch(
         self,
         X_eval,
         feature_indices,
         n_resamples,
         X_background=None,
+        **sampling_kwargs,
     ):
-        """Generate replacement values for evaluation observations.
+        """Generate replacements with shape (n_eval, n_selected_features, n_resamples)."""
+        if not self.is_fitted:
+            raise RuntimeError("Sampler must be fitted before sampling.")
 
-        Returns
-        -------
-        replacement_values : ndarray
-            Shape (n_eval, n_selected_features, n_resamples).
-            The middle axis follows the order of `feature_indices`.
-        """
-        pass
-    
+        X_eval, feature_indices, samples = self._prepare_sampling(
+            X_eval,
+            feature_indices,
+            n_resamples,
+            n_features=self.feature_size,
+        )
+
+        for local_j, feature_idx in enumerate(feature_indices):
+            if feature_idx not in self.fits:
+                raise RuntimeError("The sampler has not been fitted for this feature.")
+
+            samples[:, local_j, :] = self._sample_feature(
+                self.fits[feature_idx],
+                X_eval,
+                feature_idx,
+                n_resamples,
+                X_background,
+                **sampling_kwargs,
+            )
+
+        return samples  
+        
+    def _fit_feature(self, X_train, feature_idx, feature_type):
+        """Return the fitted result needed to sample one feature."""
+        raise NotImplementedError
+
+    def _sample_feature(
+        self,
+        fitted_model,
+        X_eval,
+        feature_idx,
+        n_resamples,
+        X_background,
+        **sampling_kwargs,
+    ):
+        """Return replacements with shape (n_eval, n_resamples)."""
+        raise NotImplementedError
+
     @staticmethod
     def _resolve_feature_bounds(
         X_background,
@@ -130,6 +167,45 @@ class Sampler(ABC):
         self.feature_size = feature_size
         return X_train
 
+    def _prepare_group_fitting(
+        self,
+        X_train,
+        feature_indices,
+        feature_types=None,
+    ):
+        """Validate group fitting inputs and resolve target types."""
+        feature_indices = np.asarray(feature_indices)
+
+        if feature_indices.ndim != 1:
+            raise ValueError("feature_indices must be a 1D array.")
+        if len(feature_indices) == 0:
+            raise ValueError("feature_indices must not be empty.")
+        if len(np.unique(feature_indices)) != len(feature_indices):
+            raise ValueError("feature_indices must not contain duplicates.")
+
+        # Reuse full-dataset, schema, and feature-count validation.
+        X_train = self._prepare_fitting(
+            X_train,
+            feature_indices[0],
+        )
+
+        if np.any(feature_indices < 0) or np.any(
+            feature_indices >= self.feature_size
+        ):
+            raise ValueError("feature_indices contains an out-of-range feature index.")
+
+        expected_types = [
+            self.feature_types[feature_idx]
+            for feature_idx in feature_indices
+        ]
+        if feature_types is not None and list(feature_types) != expected_types:
+            raise ValueError("Group feature types do not match the stored feature schema.")
+
+        feature_indices = [
+            int(feature_idx) for feature_idx in feature_indices
+        ]
+        return X_train, feature_indices, expected_types
+        
     @staticmethod
     def _prepare_sampling(
         X_eval,
