@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..sampler import Sampler
-from ...LUCID_calculation.loss import prediction_loss
+from ...lucid_calculation.loss import prediction_loss
 
 
 class OptimalLUCIDSampler(Sampler):

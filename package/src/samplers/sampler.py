@@ -167,44 +167,6 @@ class Sampler(ABC):
         self.feature_size = feature_size
         return X_train
 
-    def _prepare_group_fitting(
-        self,
-        X_train,
-        feature_indices,
-        feature_types=None,
-    ):
-        """Validate group fitting inputs and resolve target types."""
-        feature_indices = np.asarray(feature_indices)
-
-        if feature_indices.ndim != 1:
-            raise ValueError("feature_indices must be a 1D array.")
-        if len(feature_indices) == 0:
-            raise ValueError("feature_indices must not be empty.")
-        if len(np.unique(feature_indices)) != len(feature_indices):
-            raise ValueError("feature_indices must not contain duplicates.")
-
-        # Reuse full-dataset, schema, and feature-count validation.
-        X_train = self._prepare_fitting(
-            X_train,
-            feature_indices[0],
-        )
-
-        if np.any(feature_indices < 0) or np.any(
-            feature_indices >= self.feature_size
-        ):
-            raise ValueError("feature_indices contains an out-of-range feature index.")
-
-        expected_types = [
-            self.feature_types[feature_idx]
-            for feature_idx in feature_indices
-        ]
-        if feature_types is not None and list(feature_types) != expected_types:
-            raise ValueError("Group feature types do not match the stored feature schema.")
-
-        feature_indices = [
-            int(feature_idx) for feature_idx in feature_indices
-        ]
-        return X_train, feature_indices, expected_types
         
     @staticmethod
     def _prepare_sampling(

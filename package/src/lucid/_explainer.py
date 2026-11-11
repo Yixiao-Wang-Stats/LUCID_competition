@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from LUCID_calculation.lucid import (
+from lucid_calculation.lucid_values import (
     lucid_single_observation_single_feature,
 )
 from pathlib import Path
@@ -67,7 +67,7 @@ class Explainer:
             self.cde == "tabpfn"
             and self.cde_kwargs.get("backend", "local") == "local"
         ):
-            from sampler.tabpfn.tabpfn_sampler import _SharedTabPFNModel
+            from samplers.tabpfn.tabpfn_sampler import _SharedTabPFNModel
 
             self._tabpfn_model = _SharedTabPFNModel()
 
@@ -79,7 +79,7 @@ class Explainer:
         kwargs["feature_types"] = self.feature_types
 
         if self.cde == "permutation":
-            from sampler.permutation.permutation_sampler import PermutationSampler
+            from samplers.permutation.permutation_sampler import PermutationSampler
 
             return PermutationSampler(**kwargs)
 
@@ -93,11 +93,11 @@ class Explainer:
             )
 
             if self.cde == "cmr":
-                from sampler.cmr.cmr_sampler import CMRSampler
+                from samplers.cmr.cmr_sampler import CMRSampler
 
                 return CMRSampler(**kwargs)
 
-            from sampler.gcmr.gcmr_sampler import GCMRSampler
+            from samplers.gcmr.gcmr_sampler import GCMRSampler
 
             return GCMRSampler(**kwargs)
 
@@ -107,7 +107,7 @@ class Explainer:
             kwargs["output_dir"] = workspace
 
             if self.cde == "drbart":
-                from sampler.drbart.drbart_sampler import DRBartSampler
+                from samplers.drbart.drbart_sampler import DRBartSampler
 
                 kwargs.setdefault(
                     "seed",
@@ -116,12 +116,12 @@ class Explainer:
                 sampler = DRBartSampler(**kwargs)
 
             elif self.cde == "arf":
-                from sampler.arf.arf_sampler import ARFSampler
+                from samplers.arf.arf_sampler import ARFSampler
 
                 sampler = ARFSampler(**kwargs)
 
             else:
-                from sampler.cspfi.cspfi_sampler import CSPFISampler
+                from samplers.cspfi.cspfi_sampler import CSPFISampler
 
                 kwargs.setdefault(
                     "seed",
@@ -132,7 +132,7 @@ class Explainer:
             return sampler
 
         if self.cde == "tabpfn":
-            from sampler.tabpfn.tabpfn_sampler import TabPFNSampler
+            from samplers.tabpfn.tabpfn_sampler import TabPFNSampler
 
             return TabPFNSampler(
                 _shared_model=self._tabpfn_model,
@@ -244,7 +244,7 @@ class Explainer:
     ):
         if isinstance(X_eval, pd.DataFrame) and self._uses_dataframe:
             X_eval = X_eval.loc[:, self.feature_names]
-
+        
         X_eval = np.asarray(X_eval, dtype=float)
 
         if X_eval.ndim != 2 or X_eval.shape[1] != len(self.feature_names):

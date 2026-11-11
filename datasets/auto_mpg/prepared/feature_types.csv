@@ -1,0 +1,8 @@
+feature_idx,feature_name,feature_type
+0,displacement,continuous
+1,cylinders,continuous
+2,horsepower,continuous
+3,weight,continuous
+4,acceleration,continuous
+5,model_year,continuous
+6,origin,continuous

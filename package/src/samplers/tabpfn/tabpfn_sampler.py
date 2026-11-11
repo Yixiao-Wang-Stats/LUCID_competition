@@ -64,7 +64,6 @@ class TabPFNSampler(Sampler):
         version="v3.5", 
         backend="local", 
         device="auto",
-        batch_size=256, 
         random_state=None, 
         _shared_model=None,
         **model_kwargs,
@@ -73,18 +72,25 @@ class TabPFNSampler(Sampler):
         self.version = version
         self.backend = backend
         self.device = device
-        self.batch_size = batch_size
         self.model_kwargs = dict(model_kwargs)
         self._shared_model = (
             _shared_model
             if _shared_model is not None
             else _SharedTabPFNModel()
-        )
+        ) if backend == "local" else None
 
     def _fit_feature(self, X_train, feature_idx, feature_type):
         X = np.asarray(X_train, dtype=float)
-        context = np.delete(X, feature_idx, axis=1)
-        target = X[:, feature_idx]
+        return self._fit_model(
+            X_predictors=np.delete(X, feature_idx, axis=1),
+            X_target=X[:, feature_idx],
+            feature_type=feature_type,
+        )
+
+    def _fit_model(self, X_predictors, X_target, feature_type):
+        """Fit one conditional context using the retained pretrained network."""
+        context = np.asarray(X_predictors, dtype=float)
+        target = np.asarray(X_target)
 
         classes = None
         categorical = feature_type != "continuous"
@@ -162,66 +168,79 @@ class TabPFNSampler(Sampler):
         n_resamples,
         X_background,
     ):
-        X = np.asarray(X_eval, dtype=float)
+        X_eval = np.asarray(X_eval, dtype=float)
+        return self._sample_model(
+            fitted_model,
+            X_predictors=np.delete(X_eval, feature_idx, axis=1),
+            feature_type=self.feature_types[feature_idx],
+            n_resamples=n_resamples,
+        )
+
+    def _sample_model(
+        self,
+        fitted_model,
+        X_predictors,
+        feature_type,
+        n_resamples,
+    ):
+        """Draw target values conditional on the supplied predictor rows."""
+        X_eval_minus_j = np.asarray(X_predictors, dtype=float)
 
         if fitted_model["constant"] is not None:
             return np.full(
-                (len(X), n_resamples),
+                (len(X_eval_minus_j), n_resamples),
                 fitted_model["constant"],
                 dtype=float,
-            )
+            )  # For constant features in binary or categorical feature cases, return the constant value for all resamples.
 
-        context = np.delete(X, feature_idx, axis=1)
         model = fitted_model["model"]
-        feature_type = self.feature_types[feature_idx]
         replacement_values = np.empty(
-            (len(X), n_resamples)
+            (len(X_eval_minus_j), n_resamples)
         )
 
-        for start in range(0, len(X), self.batch_size):
-            stop = min(start + self.batch_size, len(X))
-            batch = context[start:stop]
+        if len(X_eval_minus_j) == 0:
+            return replacement_values
 
-            if feature_type != "continuous":
-                probabilities = np.asarray(
-                    model.predict_proba(batch)
-                )
-                labels = np.asarray(model.classes_, dtype=int)
-                classes = fitted_model["classes"][labels]
+        if feature_type != "continuous":
+            probabilities = np.asarray(
+                model.predict_proba(X_eval_minus_j)
+            )  # shape: (len(X_eval), len(classes))
+            labels = np.asarray(model.classes_, dtype=int)
+            classes = fitted_model["classes"][labels]
 
-                for row, p in enumerate(probabilities):
-                    replacement_values[start + row] = (
-                        self.rng.choice(
-                            classes,
-                            size=n_resamples,
-                            p=p / p.sum(),
-                        )
+            for row, p in enumerate(probabilities):
+                replacement_values[row] = (
+                    self.rng.choice(
+                        classes,
+                        size=n_resamples,
+                        p=p / p.sum(),
                     )
+                )
 
-            else:
-                full = model.predict(
-                    batch, output_type="full"
-                )
-                logits = (
-                    torch.as_tensor(full["logits"])
-                    .detach().cpu().double()
-                )
-                borders = (
-                    full["criterion"].borders
-                    if "criterion" in full
-                    else full["borders"]
-                )
-                borders = (
-                    torch.as_tensor(borders)
-                    .detach().cpu().double()
-                )
-                criterion = FullSupportBarDistribution(borders)
+        else:
+            full = model.predict(
+                X_eval_minus_j, output_type="full"
+            )
+            logits = (
+                torch.as_tensor(full["logits"])
+                .detach().cpu().double()
+            )
+            borders = (
+                full["criterion"].borders
+                if "criterion" in full
+                else full["borders"]
+            )
+            borders = (
+                torch.as_tensor(borders)
+                .detach().cpu().double()
+            )
+            criterion = FullSupportBarDistribution(borders)  # the bin distribution
 
-                replacement_values[start:stop] = self._draw(
-                    criterion,
-                    logits,
-                    n_resamples,
-                )
+            replacement_values[:] = self._draw(
+                criterion,
+                logits,
+                n_resamples,
+            )
 
         return replacement_values
 
@@ -229,7 +248,7 @@ class TabPFNSampler(Sampler):
         generator = torch.Generator(device="cpu")
         generator.manual_seed(self._next_r_seed())
 
-        with torch.inference_mode():
+        with torch.inference_mode():  # turn off gradient tracking
             bins = torch.multinomial(
                 logits.softmax(-1),
                 count,

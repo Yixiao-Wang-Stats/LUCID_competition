@@ -1,0 +1,8 @@
+feature_idx,feature_name,lower_bound,upper_bound,bound_source
+0,displacement,29.299999999999997,493.7,padded
+1,cylinders,2.5,8.5,padded
+2,horsepower,27.599999999999998,248.4,padded
+3,weight,1260.3,5492.7,padded
+4,acceleration,6.32,26.48,padded
+5,model_year,68.8,83.2,padded
+6,origin,0.8,3.2,padded
