@@ -34,6 +34,22 @@ residual methods. Marginal permutation is also available as a baseline.
 
 The background data determine the distributions used for replacement. They usually come from the predictive model's training data. Evaluation data identify the observations to explain.
 
+If you are familiar with SHAP, LUCID follows a similar workflow:
+
+```python
+# SHAP
+explainer = shap.Explainer(model, X_background)
+explanation = explainer(X_eval)
+
+# LUCID
+explainer = lucid.Explainer(model, X_background, sampler="cmr")
+explanation = explainer(X_eval)
+```
+
+Both return explanation objects with a `.values` attribute, but the values
+measure different quantities: SHAP provides additive feature attributions,
+whereas LUCID measures prediction sensitivity under feature replacement.
+
 ## Installation
 
 The current package requires Python 3.14.
