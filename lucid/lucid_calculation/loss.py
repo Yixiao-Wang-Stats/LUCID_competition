@@ -9,6 +9,7 @@ def prediction_loss(prediction: np.ndarray, target: np.ndarray, loss_type: str) 
     - "ce" or "cross_entropy": Cross entropy loss 
     """
 
+    # Convert predictions and targets without reducing the observation-wise losses.
     prediction = np.asarray(prediction, dtype=float)
     target = np.asarray(target, dtype=float)
     if loss_type in {"l2","mse", "squared_error"}:

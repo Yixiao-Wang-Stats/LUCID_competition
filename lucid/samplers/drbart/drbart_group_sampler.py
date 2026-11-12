@@ -59,11 +59,15 @@ class DRBartGroupSampler(GroupSampler):
         group_key,
     ):
         """Fit and retain one conditional factor's model files."""
+        # Keep model files separate for each ordered feature group and each conditional
+        # target feature.
         group_name = "group_" + "_".join(map(str, group_key))
         feature_output_dir = (
             self.output_dir / group_name / f"feature_{feature_idx}"
         )
 
+        # Reuse the single-feature BART or DRBART fitting implementation with feature-group
+        # conditioning columns.
         if feature_type in {"binary", "categorical"}:
             self.bart_sampler._fit_model(
                 X_predictors=X_predictors,
@@ -78,6 +82,8 @@ class DRBartGroupSampler(GroupSampler):
                 feature_output_dir=feature_output_dir,
             )
 
+        # Retain the number of saved draws so uncertainty calls can select valid posterior
+        # IDs.
         return {
             "fit_dir": feature_output_dir,
             "posterior_count": int(
@@ -112,6 +118,8 @@ class DRBartGroupSampler(GroupSampler):
         posterior_id = None
         row_posterior_ids = None
 
+        # Fix one posterior draw per conditional factor for this feature-group uncertainty
+        # replicate.
         if mode == "credible_interval":
             if (
                 factor_posterior_ids is None
@@ -132,6 +140,8 @@ class DRBartGroupSampler(GroupSampler):
                 fitted_model["posterior_count"] + 1,
                 size=n_group_resamples,
             )
+            # Match posterior IDs to flattened (evaluation observation, resampling path)
+            # rows.
             row_posterior_ids = np.tile(path_ids, n_eval)
 
         if feature_type in {"binary", "categorical"}:
@@ -143,6 +153,7 @@ class DRBartGroupSampler(GroupSampler):
                 row_posterior_ids=row_posterior_ids,
             )
 
+        # Bound this continuous feature using its own background marginal.
         bounds = self._resolve_feature_bounds(
             X_background=np.asarray(X_background)[:, [feature_idx]],
             feature_types=["continuous"],
@@ -165,6 +176,7 @@ class DRBartGroupSampler(GroupSampler):
         X_background=None,
         **sampling_kwargs,
     ):
+        # Supply feature-group dimensions needed to interpret flattened resampling paths.
         return super().sample_group(
             X_eval=X_eval,
             feature_indices=feature_indices,
@@ -213,6 +225,8 @@ class DRBartGroupSampler(GroupSampler):
             )
         )
         
+        # Choose one saved posterior draw for each conditional factor in the ordered feature
+        # group.
         factor_posterior_ids = np.array([
             rng.integers(
                 1,

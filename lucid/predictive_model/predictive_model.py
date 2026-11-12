@@ -11,6 +11,7 @@ class PredictiveModel(ABC):
         self,
         X,
     ):
+        # Let the same fitted predictive model be used through predict(X) or model(X).
         return self.predict(X)
 
     @abstractmethod

@@ -17,6 +17,8 @@ class UncertaintyExplainer(Explainer):
         self._posterior_ids = {}
 
     def _compute_feature(self, feature_idx, *args, **kwargs):
+        # Pass this feature's selected posterior ID through every evaluation-observation
+        # batch.
         return super()._compute_feature(
             feature_idx,
             *args,
@@ -36,6 +38,7 @@ class UncertaintyExplainer(Explainer):
         if n_posterior_draws < 2:
             raise ValueError("n_posterior_draws must be at least two.")
 
+        # Resolve the selected features before fitting and selecting posterior draws.
         indices = (
             list(range(len(self.feature_names)))
             if features is None
@@ -52,6 +55,8 @@ class UncertaintyExplainer(Explainer):
         rng = np.random.default_rng(self.random_state)
         selected_ids = []
 
+        # Fit each conditional model once and select distinct saved posterior IDs for that
+        # feature.
         for feature_idx in indices:
             sampler = self._get_sampler(feature_idx)
             fit_dir = Path(sampler.fits[feature_idx])
@@ -71,10 +76,14 @@ class UncertaintyExplainer(Explainer):
                 ) + 1
             )
 
+        # Each row assigns one posterior draw to every selected feature; IDs are one-based
+        # for the sampler.
         posterior_ids = np.column_stack(selected_ids)
         posterior_values = []
 
         try:
+            # Hold the selected posterior IDs fixed while generating replacement draws and
+            # evaluating LUCID.
             for ids in posterior_ids:
                 self._posterior_ids = dict(zip(indices, ids))
 
@@ -86,9 +95,11 @@ class UncertaintyExplainer(Explainer):
                     n_eval_batch=n_eval_batch,
                 )
                 posterior_values.append(explanation.values)
+        # Clear posterior-specific task state even if sampling or prediction fails.
         finally:
             self._posterior_ids = {}
 
+        # Stack results as (posterior draws, evaluation observations, selected features).
         return UncertaintyExplanation(
             posterior_values=np.stack(posterior_values),
             feature_names=[self.feature_names[j] for j in indices],

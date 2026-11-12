@@ -26,6 +26,8 @@ def _index(feature, names):
 
 
 def _order(values, names, order, max_display):
+    # Default to descending mean importance, or preserve the caller's explicit feature
+    # order.
     indices = (
         np.argsort(-values.mean(axis=0), kind="stable")
         if order is None
@@ -43,6 +45,8 @@ def _order(values, names, order, max_display):
 
 
 def _feature_data(X, names, n_rows):
+    # Align DataFrame columns by feature name; array columns must already be in explanation
+    # order.
     if hasattr(X, "loc"):
         matrix = X.loc[:, names].to_numpy()
     else:
@@ -70,6 +74,7 @@ def _is_categorical(values):
 
 
 def _category_colors(values, cmap):
+    # Map category labels to stable color indices within this feature.
     labels, codes = np.unique(values, return_inverse=True)
     palette = plt.get_cmap(cmap)(np.linspace(0.1, 0.9, len(labels)))
     return labels, codes, palette
@@ -83,6 +88,8 @@ def _swarm_offsets(values, width=0.35):
         if span == 0
         else np.floor(99 * (values - values.min()) / span).astype(int)
     )
+    # Alternate vertical offsets around each feature row for points in the same horizontal
+    # bin.
     offsets = np.zeros(len(values))
     for bin_id in np.unique(bins):
         rows = np.flatnonzero(bins == bin_id)
@@ -107,6 +114,8 @@ def _colorbar(ax, points, options, relative=False):
     kwargs = {"label": "Feature value", "pad": 0.02}
     kwargs.update(options or {})
     colorbar = ax.figure.colorbar(points, ax=ax, **kwargs)
+    # Label per-feature normalized colors as Low and High rather than original measurement
+    # units.
     if relative and "ticks" not in kwargs:
         colorbar.set_ticks([0, 1], labels=["Low", "High"])
     return colorbar

@@ -15,11 +15,15 @@ def bar(
     Return the Matplotlib axes. Extra keywords are passed to ``ax.barh``.
     """
     values, names = _data(explanation)
+    # Use either an evaluation-observation average or one selected observation's feature
+    # values.
     scores = values.mean(axis=0) if observation is None else values[observation]
     indices = _order(scores[None, :], names, order, max_display)
     if ax is None:
         _, ax = plt.subplots(figsize=(6, max(2, 0.45 * len(indices) + 1)))
 
+    # Merge caller styling with the defaults before drawing ordered feature or feature-group
+    # bars.
     options = {"color": color, "height": 0.7, "edgecolor": "none"}
     options.update(kwargs)
     ax.barh(np.arange(len(indices)), scores[indices], **options)

@@ -18,6 +18,8 @@ def observations(
     Extra keywords are passed to ``ax.scatter``.
     """
     values, names = _data(explanation)
+    # Interpret selections as zero-based positions in the explanation's evaluation
+    # observations.
     single = isinstance(observations, (int, np.integer))
     rows = np.asarray([observations] if single else list(observations))
     if rows.ndim != 1 or rows.size == 0 or rows.dtype.kind not in "iu":
@@ -27,6 +29,8 @@ def observations(
     if ncols < 1:
         raise ValueError("ncols must be positive.")
 
+    # Allocate enough panels for the selected evaluation observations, with ncols panels per
+    # row.
     if axes is None:
         columns = 1 if single else ncols
         nrows = (len(rows) + columns - 1) // columns
@@ -41,6 +45,8 @@ def observations(
 
     options = {"color": color, "s": s, "zorder": 3}
     options.update(kwargs)
+    # Order and display feature or feature-group importance separately for each selected
+    # evaluation observation.
     for row, ax in zip(rows, panels):
         scores = values[row]
         indices = _order(scores[None, :], names, order, max_display)
@@ -48,6 +54,7 @@ def observations(
         _summary_axis(
             ax, [names[j] for j in indices], f"LUCID value (observation {row})"
         )
+    # Hide unused panels in the last row.
     for ax in panels[len(rows):]:
         ax.set_axis_off()
     return panels[0] if single else np.atleast_2d(axes)

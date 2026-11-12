@@ -4,6 +4,8 @@ arf_fit <- function(X_train,output_dir,feature_types,seed = 2026) {
     if (length(feature_types) != ncol(X_train)) {
         stop("feature_types must have one entry per feature.")
     }
+    # Restore categorical columns as factors before estimating the joint feature
+    # distribution.
     for (j in seq_len(ncol(X_train))) {
         if (feature_types[j] %in% c("binary","categorical")) {
             if (feature_types[j] == "binary" &&
@@ -25,18 +27,21 @@ arf_fit <- function(X_train,output_dir,feature_types,seed = 2026) {
     
     # Estimate distribution parameters
     psi <- arf::forde(arf = fit,x = X_train)
+    # Save factor levels so sampling can reconstruct the same feature schema.
     schema <- list(
         feature_types = feature_types,
         factor_levels = lapply(X_train,function(column) {
             if (is.factor(column)) levels(column) else NULL
         })
     )
+    # Persist the forest, leaf-density parameters, and schema for Python to reuse.
     saveRDS(fit,file = file.path(output_dir,"fit.rds"))
     saveRDS(psi,file = file.path(output_dir,"psi.rds"))
     saveRDS(schema,file = file.path(output_dir,"schema.rds"))
     invisible(fit)
 }
 
+# Read the data paths and seed passed by the Python fitting wrapper.
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 4L) {
     stop("Invalid number of arguments.")

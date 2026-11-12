@@ -19,6 +19,8 @@ class _SharedTabPFNModel:
         multitask = version.value in {"v3.5", "v3.5-fast"}
         key = (version.value, None if multitask else model_class)
 
+        # Serialize first-time loading so concurrent feature tasks reuse the same retained
+        # network specifications.
         with self._lock:
             if key not in self._specs:
                 loader = model_class.create_default_for_version(
@@ -40,6 +42,8 @@ class _SharedTabPFNModel:
                     loader, "znorm_space_bardist_", None
                 )
 
+                # Pass network objects and their inference settings to separate
+                # feature-specific estimators.
                 self._specs[key] = [
                     ModelSpecs(
                         model=network,
@@ -73,6 +77,8 @@ class TabPFNSampler(Sampler):
         self.backend = backend
         self.device = device
         self.model_kwargs = dict(model_kwargs)
+        # Keep a local network owner only for local inference; hosted estimators use the
+        # external service.
         self._shared_model = (
             _shared_model
             if _shared_model is not None
@@ -95,6 +101,8 @@ class TabPFNSampler(Sampler):
         classes = None
         categorical = feature_type != "continuous"
 
+        # Encode discrete target values as class indices; a constant target needs no
+        # classifier.
         if categorical:
             classes, target = np.unique(
                 target, return_inverse=True
@@ -112,6 +120,8 @@ class TabPFNSampler(Sampler):
         }
         version = self.version
 
+        # Choose the installed local estimator or hosted client and its supported
+        # context-caching mode.
         if self.backend == "local":
             from tabpfn import TabPFNClassifier, TabPFNRegressor
             from tabpfn.constants import ModelVersion
@@ -144,6 +154,8 @@ class TabPFNSampler(Sampler):
         )
 
         if self.backend == "local":
+            # Initialize this feature context with retained local weights rather than
+            # loading another network.
             options["model_path"] = self._shared_model.get_specs(
                 model_class, version, options
             )
@@ -152,6 +164,7 @@ class TabPFNSampler(Sampler):
             version=version,
             **options,
         )
+        # Fit preprocessing and the conditional context for this target feature.
         model.fit(context, target)
 
         return {
@@ -201,6 +214,8 @@ class TabPFNSampler(Sampler):
         if len(X_eval_minus_j) == 0:
             return replacement_values
 
+        # Sample original category values using the classifier's conditional probability
+        # mass.
         if feature_type != "continuous":
             probabilities = np.asarray(
                 model.predict_proba(X_eval_minus_j)
@@ -218,6 +233,8 @@ class TabPFNSampler(Sampler):
                 )
 
         else:
+            # Read the full predictive distribution, rather than sampling around a point
+            # prediction.
             full = model.predict(
                 X_eval_minus_j, output_type="full"
             )
@@ -225,6 +242,8 @@ class TabPFNSampler(Sampler):
                 torch.as_tensor(full["logits"])
                 .detach().cpu().double()
             )
+            # Accept distribution borders returned directly or attached to TabPFN's
+            # criterion.
             borders = (
                 full["criterion"].borders
                 if "criterion" in full
@@ -245,10 +264,13 @@ class TabPFNSampler(Sampler):
         return replacement_values
 
     def _draw(self, criterion, logits, count):
+        # Use a sampler-derived seed without modifying PyTorch's global random stream.
         generator = torch.Generator(device="cpu")
         generator.manual_seed(self._next_r_seed())
 
         with torch.inference_mode():  # turn off gradient tracking
+            # Draw distribution buckets for each evaluation observation from their predicted
+            # probabilities.
             bins = torch.multinomial(
                 logits.softmax(-1),
                 count,
@@ -256,6 +278,7 @@ class TabPFNSampler(Sampler):
                 generator=generator,
             )
 
+            # Generate uniform values within interior buckets.
             widths = criterion.bucket_widths
             values = (
                 criterion.borders[bins]
@@ -266,6 +289,7 @@ class TabPFNSampler(Sampler):
                 )
             )
 
+            # The two outer buckets use half-normal tails instead of bounded uniform draws.
             lower_scale = (
                 criterion.halfnormal_with_p_weight_before(widths[0]).scale
             )
@@ -285,6 +309,7 @@ class TabPFNSampler(Sampler):
                 generator=generator,
             ).abs()
 
+            # Substitute tail draws only where an outer bucket was selected.
             values = torch.where(bins == 0, lower, values)
             values = torch.where(
                 bins == logits.shape[-1] - 1, upper, values

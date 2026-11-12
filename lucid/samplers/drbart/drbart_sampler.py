@@ -51,6 +51,8 @@ class DRBartSampler(Sampler):
         )
 
     def _fit_feature(self, X_train, feature_idx, feature_type):
+        # Use BART class probabilities for discrete features and R-based density regression
+        # for continuous features.
         if feature_type in {"binary", "categorical"}:
             self.bart_sampler.fit(
                 X_train,
@@ -77,11 +79,14 @@ class DRBartSampler(Sampler):
         feature_output_dir = Path(feature_output_dir)
         feature_output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Export the target feature separately from its conditioning predictors for R.
         X_train_file = feature_output_dir / "X_train.csv"
         y_train_file = feature_output_dir / "y_train.csv"
         np.savetxt(X_train_file, X_predictors, delimiter=",")
         np.savetxt(y_train_file, X_target, delimiter=",")
 
+        # Pass MCMC settings to the packaged R fitting script and retain the fitted model
+        # directory.
         subprocess.run(
             [
                 "Rscript",
@@ -100,6 +105,7 @@ class DRBartSampler(Sampler):
             check=True,
         )
 
+        # Delete only the exported training CSVs after R has saved its fitted artifacts.
         X_train_file.unlink(missing_ok=True)
         y_train_file.unlink(missing_ok=True)
         return feature_output_dir
@@ -115,6 +121,7 @@ class DRBartSampler(Sampler):
     ):
         feature_type = self.feature_types[feature_idx]
 
+        # Delegate discrete replacements to BART, forwarding any fixed posterior selection.
         if feature_type in {"binary", "categorical"}:
             replacement_values = self.bart_sampler.sample(
                 X_eval=X_eval,
@@ -134,6 +141,8 @@ class DRBartSampler(Sampler):
             feature_types=["continuous"],
         )[0]  # (lower, upper)
 
+        # Mix posterior draws for ordinary LUCID, or hold one draw fixed for posterior
+        # uncertainty.
         return self._sample_from_r(
             X_eval_minus_j=X_eval_minus_j,
             fit_dir=fitted_model,
@@ -186,6 +195,7 @@ class DRBartSampler(Sampler):
             raise ValueError("X_eval_minus_j must be a 2D array.")
         n_eval = X_eval_minus_j.shape[0]
 
+        # Isolate each R sampling request while retaining the fitted model files for reuse.
         temporary_dir = Path(
             tempfile.mkdtemp(
                 prefix=f"{Path(fit_dir).name}_",
@@ -207,6 +217,8 @@ class DRBartSampler(Sampler):
             str(mode),
             str(self._next_r_seed()),
         ]
+        # Append the fixed posterior ID before optional bounds, matching the R script's
+        # argument order.
         if mode == "credible_interval":
             command.append(str(posterior_id))
         if bounds is not None:
@@ -217,6 +229,7 @@ class DRBartSampler(Sampler):
                 str(Path(fit_dir).name),
             ])
         subprocess.run(command, check=True)
+        # Read the R output as (evaluation observations, replacement draws).
         replacement_values = np.asarray(
             np.loadtxt(output_file, delimiter=",")
         ).reshape(n_eval, n_resamples)

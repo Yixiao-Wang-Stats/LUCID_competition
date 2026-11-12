@@ -26,6 +26,7 @@ class ARFSampler(Sampler):
     def _fit_feature(self, X_train, feature_idx, feature_type):
         if self.output_dir is None:
             raise ValueError("output_dir must be provided.")
+        # One ARF fit models the full joint distribution and can serve every target feature.
         if self._joint_fit is not None:
             return self._joint_fit
         fit_dir = self.output_dir / "joint"
@@ -36,6 +37,7 @@ class ARFSampler(Sampler):
         schema_file = fit_dir / "schema.rds"
         X_train_file = fit_dir / "X_train.csv"
         feature_types_file = fit_dir / "feature_types.txt"
+        # Export numeric data and feature types so R can restore categorical columns.
         feature_types_file.write_text("\n".join(self.feature_types) + "\n")
         np.savetxt(
             X_train_file,
@@ -51,6 +53,8 @@ class ARFSampler(Sampler):
             else 2026
         )
 
+        # Fit the joint forest and density in R, then keep their paths for later conditional
+        # sampling.
         subprocess.run(
             [
                 "Rscript",
@@ -79,6 +83,8 @@ class ARFSampler(Sampler):
     ):
         n_eval = len(X_eval)
 
+        # Give each sampling request its own exchange directory to avoid overwriting
+        # concurrent requests.
         temporary_dir = Path(
             tempfile.mkdtemp(
                 prefix=f"feature_{feature_idx}_",
@@ -104,6 +110,7 @@ class ARFSampler(Sampler):
             check=True,
         )
 
+        # Read R's replacements and restore one row per evaluation observation.
         replacement_values = np.asarray(
             np.loadtxt(output_file, delimiter=",")
         ).reshape(-1)

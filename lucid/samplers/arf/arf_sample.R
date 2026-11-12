@@ -42,6 +42,7 @@ sample_arf <- function(
     }
 
     target_idx_r <- feature_idx + 1L  # the target feature index in 1 based
+    # Recreate training factor levels and reject unseen categories in conditioning features.
     for (j in seq_len(ncol(x))) {
         if (schema$feature_types[j] %in% c("binary","categorical")) {
             values <- as.character(x[[j]])
@@ -58,6 +59,8 @@ sample_arf <- function(
     
     conditioning_indices <- setdiff(seq_len(feature_size),target_idx_r)  # remaining feature indices
 
+    # Condition on all features except the target feature; each evidence row is an
+    # evaluation observation.
     evidence <- x[
         ,
         conditioning_indices,
@@ -77,6 +80,7 @@ sample_arf <- function(
         replacement <- as.numeric(as.character(replacement))
     }
 
+    # Return one row per evaluation observation, with its replacement draws in columns.
     matrix(
         replacement,
         nrow = n_eval,
@@ -86,6 +90,8 @@ sample_arf <- function(
 }
 
 
+# Load Python's sampling request, generate replacements, and write a header-free CSV
+# response.
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) != 6L) {

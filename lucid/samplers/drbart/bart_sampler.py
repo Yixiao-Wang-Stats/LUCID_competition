@@ -40,6 +40,8 @@ def load_bart_fit(fit_dir):
 
         baseline_forest,batches = histories[0]
 
+        # Reconstruct a prediction sampler from the saved initial forest and tree-update
+        # history.
         posterior_sampler = PosteriorSampler.from_history(
             batches,
             baseline_forest,
@@ -72,6 +74,7 @@ class BartSampler(Sampler):
         
 
     def _fit_feature(self, X_train, feature_idx, feature_type):
+        # For an individual feature, condition on every other feature column.
         return self._fit_model(
             X_predictors=np.delete(
                 X_train, feature_idx, axis=1
@@ -108,9 +111,13 @@ class BartSampler(Sampler):
             raise ValueError("Binary BART requires exactly two categories.")
         if feature_type == "categorical" and len(categories) < 2:
             raise ValueError("Categorical BART requires at least two categories.")
+        # Map original category values to consecutive class codes and retain their inverse
+        # mapping.
         category_to_code = {category: code for code,category in enumerate(categories)}
         y_codes = np.array([category_to_code[value] for value in X_target],dtype=int)
         # how to use follow: https://www.pymc.io/projects/bart/en/stable/examples/bart_categorical_hawks.html
+        # Model binary logits with one latent output, or categorical logits with one output
+        # per class.
         with pm.Model():
             if feature_type == "binary":
                 latent = pmb.BART("latent",X=X_predictors,Y=y_codes,m=self.m)
@@ -126,6 +133,8 @@ class BartSampler(Sampler):
                 )
                 probability = pm.math.softmax(latent,axis=0)
                 pm.Categorical("observed",p=probability.T,observed=y_codes)
+            # Save one MCMC chain of latent tree draws for later posterior predictive
+            # sampling.
             pm.sample(
                 draws=self.draws,
                 tune=self.tune,
@@ -139,6 +148,7 @@ class BartSampler(Sampler):
         history = operation.all_trees[0]
         posterior_count = self.draws
 
+        # Persist the tree history and decoding metadata rather than the full PyMC model.
         fit_artifact = {
             "histories": (history,),
             "m": self.m,
@@ -192,6 +202,8 @@ class BartSampler(Sampler):
             raise ValueError("n_resamples must be positive.")
         n_eval = X_predictors.shape[0]
         posterior_sampler,fit = load_bart_fit(fit_dir)
+        # For flattened feature-group paths, generate one replacement per row using its
+        # assigned posterior ID.
         if row_posterior_ids is not None:
             ids = np.asarray(row_posterior_ids)
             if posterior_id is not None or n_resamples != 1:
@@ -206,6 +218,8 @@ class BartSampler(Sampler):
                 raw[:,:,rows] = posterior_sampler.sample_posterior(
                     X_predictors[rows], [int(selected_id) - 1], None
                 )  # (1, n_outputs, len(rows))
+        # Without a fixed ID, mix saved posterior draws across the requested replacement
+        # draws.
         elif posterior_id is None:
             posterior_ids = self.rng.integers(
                 0,
@@ -213,12 +227,16 @@ class BartSampler(Sampler):
                 size=n_resamples
             )
         else:
+            # Convert a caller-supplied one-based posterior ID to the prediction sampler's
+            # zero-based indexing.
             if posterior_id < 1 or posterior_id > posterior_sampler.n_draws:
                 raise ValueError("posterior_id is out of range.")
             posterior_ids = np.repeat(
                 posterior_id - 1,
                 n_resamples
             )
+        # Predict latent values with axes (replacement draws, class outputs, evaluation
+        # observations).
         if row_posterior_ids is None:
             raw = posterior_sampler.sample_posterior(
                 X_predictors,
@@ -228,6 +246,7 @@ class BartSampler(Sampler):
         categories = np.asarray(fit["categories"])
         raw = np.asarray(raw, dtype=float)
 
+        # Convert latent logits to probabilities, then sample a binary or categorical label.
         if fit["feature_type"] == "binary":
             probability = expit(raw[:, 0, :])
             y_codes = self.rng.binomial(1, probability)
@@ -243,4 +262,6 @@ class BartSampler(Sampler):
         else:
             raise ValueError("Unsupported BART feature type.")
 
+        # Decode original feature values and return (evaluation observations, replacement
+        # draws).
         return categories[y_codes].T

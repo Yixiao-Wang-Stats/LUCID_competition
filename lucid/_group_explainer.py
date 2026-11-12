@@ -20,6 +20,7 @@ class GroupExplainer(Explainer):
         super().__init__(model, X_background, sampler=sampler, **kwargs)
 
     def _new_sampler(self):
+        # Create the feature-group backend with the same feature schema and random seed.
         kwargs = {
             "random_state": self.random_state,
             **self.sampler_kwargs,
@@ -42,6 +43,8 @@ class GroupExplainer(Explainer):
         return DRBartGroupSampler(**kwargs)
 
     def _get_group_sampler(self, group_key):
+        # Cache by the ordered feature indices because order determines the conditional
+        # factors.
         if group_key not in self._samplers:
             sampler = self._new_sampler()
             sampler.fit_group(self.X_background, group_key)
@@ -59,8 +62,11 @@ class GroupExplainer(Explainer):
         **sampling_kwargs,
     ):
         sampler = self._get_group_sampler(group_key)
+        # Assemble one output column per named feature group and cache each returned
+        # sampler.
         values = np.empty(len(X_eval))
 
+        # Generate joint replacements for a batch of evaluation observations.
         for start in range(0, len(X_eval), n_eval_batch):
             stop = min(start + n_eval_batch, len(X_eval))
             X_eval_batch = X_eval[start:stop]
@@ -73,6 +79,8 @@ class GroupExplainer(Explainer):
                 **sampling_kwargs,
             )
 
+            # Replace the selected features jointly for each evaluation observation and
+            # compute one feature-group value.
             for local_row, x in enumerate(X_eval_batch):
                 row = start + local_row
                 values[row] = lucid_single_observation_group(
@@ -107,6 +115,8 @@ class GroupExplainer(Explainer):
         if X_eval.ndim != 2 or X_eval.shape[1] != len(self.feature_names):
             raise ValueError("X_eval must have the same features as X_background.")
 
+        # Keep user-facing feature-group labels separate from ordered indices used for
+        # fitting.
         group_names = list(groups)
         group_keys = [
             tuple(
@@ -123,8 +133,12 @@ class GroupExplainer(Explainer):
         if len(set(group_keys)) != len(group_keys):
             raise ValueError("Each ordered feature group must be unique.")
 
+        # Use each unmodified prediction as the reference for all feature-group
+        # replacements.
         reference_predictions = self._predict(X_eval)
 
+        # Limit concurrent feature-group tasks to available workers and any Slurm
+        # allocation.
         n_workers = effective_n_jobs(self.n_jobs)
         allocated = os.environ.get("SLURM_CPUS_PER_TASK")
         if allocated is not None:
@@ -139,6 +153,8 @@ class GroupExplainer(Explainer):
             n_resamples_batch,
         )
 
+        # Run independent feature groups concurrently; conditional factors within a feature
+        # group remain sequential.
         if n_workers > 1:
             backend = "threading" if self.sampler_name == "tabpfn" else "loky"
             options = (

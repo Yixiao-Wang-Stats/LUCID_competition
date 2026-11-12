@@ -11,8 +11,12 @@ predict_mu_sigma <- function(
 ) {
     # This function predicts the mean and standard deviation for a given posterior draw and given x and u.
     x <- as.matrix(x)
+    # Append the latent mixture coordinate u to the conditioning features for mean-tree
+    # predictions.
     mean_input <- cbind(u, x)
     mu <- as.numeric(mean_trees$predict_i(t(mean_input), posterior_id - 1L))  # predict mean from i-th posterior
+    # Select the precision-tree inputs according to whether variance depends on u, features,
+    # or neither.
     if (fit$variance == "ux") {
         raw_prec <- as.numeric(prec_trees$predict_prec_i(t(mean_input),posterior_id - 1L))  # predict raw precision from i-th posterior
         sigma <- 1 / sqrt(fit$fit$phistar[posterior_id] * raw_prec)
@@ -44,6 +48,7 @@ load_drbart_trees <- function(fit) {
     if (fit$variance != "const" && !file.exists(fit$prec_file)) {
         stop("DR-BART precision tree file does not exist.")
     }
+    # Reconstruct prediction objects from the saved tree files without refitting DRBART.
     TreeSamples <- getFromNamespace("TreeSamples", "drbart") # TreeSamples is a class for handling tree samples in rcpp in drbart
     mean_trees <- TreeSamples$new()
     mean_trees$load(fit$mean_file)
@@ -109,6 +114,7 @@ truncated_distribution_sampler <- function(fit,mean_trees,prec_trees,x,posterior
         if (length(precision_cuts) != header[2L]) stop("Incomplete precision-tree u cuts.")
         cuts <- c(cuts,precision_cuts)
     }
+    # Partition the latent u interval wherever either mean or precision trees can change.
     cuts <- sort(unique(cuts))
     if (any(!is.finite(cuts)) || any(cuts < 0 | cuts > 1)) stop("Invalid posterior u cuts.")
     widths <- diff(cuts)
@@ -134,6 +140,8 @@ truncated_distribution_sampler <- function(fit,mean_trees,prec_trees,x,posterior
     }
     
     replacement <- numeric(nrow(x))
+    # Reuse bounded mixture parameters when several replacement rows share the same
+    # conditioning values.
     mixtures <- new.env(parent=emptyenv())
     for (row in seq_len(nrow(x))) {
         key <- paste0("x:",paste(sprintf("%.17g",x[row,]),collapse=","))
@@ -182,8 +190,10 @@ sample_given_single_posterior <- function(
 ) {
     # First, we get the posterior_id
     x <- as.matrix(x)
+    # Create one conditioning row per evaluation observation and replacement draw.
     x_repeat <- x[rep(seq_len(nrow(x)), each = n_resamples), , drop = FALSE]
     replacement <- numeric(nrow(x_repeat))
+    # Track only replacement draws that still need an accepted in-bounds value.
     pending <- seq_len(nrow(x_repeat))
     # try fit 10000 times sampling, if the candidate is within bounds, keep it. Otherwise, use the truncated distribution sampler.
     for (attempt in seq_len(if (is.null(bounds)) 1L else 10000L)) {
@@ -220,6 +230,8 @@ sample_posterior_for_lucid <- function(
     posterior_count <- length(fit$fit$ucuts)
     n_eval <- nrow(x)
     total_sample_size <- n_eval * n_resamples
+    # Ordinary LUCID mixes saved posterior draws separately across evaluation observations
+    # and replacements.
     posterior_ids <- sample.int(
         posterior_count,
         total_sample_size,
@@ -227,6 +239,8 @@ sample_posterior_for_lucid <- function(
     )
     replacement <- numeric(total_sample_size)
     x_repeat <- x[rep(seq_len(n_eval), each = n_resamples), , drop = FALSE]
+    # Evaluate rows sharing a posterior ID together, then put their replacements back in the
+    # original order.
     for (posterior_id in unique(posterior_ids)) {
         positions <- which(posterior_ids == posterior_id)
         current_replacement <- sample_given_single_posterior(
@@ -263,6 +277,8 @@ sample_fixed_posterior_for_credible_interval <- function(
     fit_dir = "<unspecified>"
 ) {
     n_eval <- nrow(x)
+    # Keep the same conditional-model posterior draw for every evaluation observation in
+    # this uncertainty call.
     replacement <- sample_given_single_posterior(
         fit = fit,
         mean_trees = mean_trees,
@@ -284,6 +300,8 @@ sample_fixed_posterior_for_credible_interval <- function(
 
 
 
+# Parse the sampling mode, optional fixed posterior ID, and optional continuous-feature
+# bounds.
 args <- commandArgs(trailingOnly = TRUE)
 
 if (!length(args) %in% c(6L, 7L, 9L, 10L)) {
@@ -319,6 +337,7 @@ trees <- load_drbart_trees(fit)
 
 set.seed(seed)
 
+# Choose posterior mixing for ordinary LUCID or fixed-posterior sampling for uncertainty.
 if (mode == "lucid") {
     replacement <- sample_posterior_for_lucid(
         fit = fit,
@@ -349,6 +368,7 @@ if (mode == "lucid") {
     )
 }
 
+# Return a matrix of evaluation observations by replacement draws to the Python wrapper.
 write.table(
     replacement,
     file = output_file,

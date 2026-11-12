@@ -24,21 +24,28 @@ def beeswarm(
     """
     values, names = _data(explanation)
     indices = _order(values, names, order, max_display)
+    # Match feature columns to the explanation while requiring the same
+    # evaluation-observation order.
     matrix = None if X is None else _feature_data(X, names, len(values))
     categorical = set(categorical or [])
     if ax is None:
         _, ax = plt.subplots(figsize=(7, max(2, 0.5 * len(indices) + 1)))
 
     numeric_points = None
+    # Spread overlapping points vertically without changing their LUCID values.
     for position, j in enumerate(indices):
         offsets = _swarm_offsets(values[:, j])
         options = {"s": s, "alpha": alpha, "linewidths": 0, "zorder": 3}
         if matrix is None:
             options["color"] = color
+        # Color categorical features by discrete labels without treating their codes as
+        # continuous values.
         elif names[j] in categorical or j in categorical or _is_categorical(matrix[:, j]):
             _, codes, palette = _category_colors(matrix[:, j], cmap)
             options["c"] = palette[codes]
         else:
+            # Scale continuous feature colors within each feature unless a shared
+            # normalization is supplied.
             feature_values = np.asarray(matrix[:, j], dtype=float)
             if norm is None:
                 span = np.ptp(feature_values)
@@ -53,6 +60,7 @@ def beeswarm(
             numeric_points = points
 
     _summary_axis(ax, [names[j] for j in indices], "LUCID value")
+    # Use a colorbar for continuous colors; categorical and binary legends are omitted.
     if colorbar and numeric_points is not None:
         _colorbar(ax, numeric_points, colorbar_kwargs, relative=norm is None)
     return ax

@@ -31,6 +31,8 @@ class Explainer:
         
         self.model = ModelAdapter(model)
 
+        # Retain feature names so array-based sampling can still call models that expect
+        # DataFrames.
         self._uses_dataframe = isinstance(X_background, pd.DataFrame)
         self.feature_names = (
             list(X_background.columns)
@@ -52,6 +54,8 @@ class Explainer:
 
         self._temporary_directory = None
 
+        # Own and clean an automatic workspace; retain files when the caller supplies a
+        # directory.
         if output_dir is None:
             self._temporary_directory = TemporaryDirectory(prefix="lucid_")
             self.output_dir = Path(self._temporary_directory.name)
@@ -59,10 +63,13 @@ class Explainer:
             self.output_dir = Path(output_dir)
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Keep fitted feature samplers for reuse on later explanation calls.
         self._samplers = {}
         self._arf_fit = None
         self._tabpfn_model = None
 
+        # Create one local TabPFN network owner to share pretrained weights across feature
+        # contexts.
         if (
             self.sampler_name == "tabpfn"
             and self.sampler_kwargs.get("backend", "local") == "local"
@@ -72,6 +79,7 @@ class Explainer:
             self._tabpfn_model = _SharedTabPFNModel()
 
     def _new_sampler(self):
+        # Build sampler options here so optional backends are imported only when selected.
         kwargs = {
             "random_state": self.random_state,
             **self.sampler_kwargs,
@@ -83,6 +91,8 @@ class Explainer:
 
             return PermutationSampler(**kwargs)
 
+        # Use XGBoost to estimate conditional feature means unless the caller supplies
+        # another model class.
         if self.sampler_name in {"cmr", "gcmr"}:
             from .predictive_model.xgboost_model import XGBoostModel
 
@@ -101,6 +111,7 @@ class Explainer:
 
             return GCMRSampler(**kwargs)
 
+        # Give R-backed samplers a workspace for fitted models and Python-R exchange files.
         if self.sampler_name in {"drbart", "arf", "cspfi"}:
             workspace = self.output_dir / self.sampler_name
             workspace.mkdir(parents=True, exist_ok=True)
@@ -144,9 +155,12 @@ class Explainer:
         )
 
     def _get_sampler(self, feature_idx):
+        # Fit each requested feature lazily on the background data and cache its sampler.
         if feature_idx not in self._samplers:
             sampler = self._new_sampler()
 
+            # Reuse ARF's joint distribution fit rather than fitting it again for every
+            # target feature.
             if self.sampler_name == "arf":
                 sampler._joint_fit = self._arf_fit
 
@@ -170,6 +184,8 @@ class Explainer:
 
         predictions = self.model(X)
 
+        # Accept a single prediction column, then require one scalar prediction per
+        # observation.
         if predictions.ndim == 2 and predictions.shape[1] == 1:
             predictions = predictions[:, 0]
 
@@ -193,6 +209,7 @@ class Explainer:
         sampler = self._get_sampler(feature_idx)
         feature_values = np.empty(len(X_eval))
 
+        # Request replacements for a batch of evaluation observations at a time.
         for start in range(0, len(X_eval), n_eval_batch):
             stop = min(start + n_eval_batch, len(X_eval))
             X_eval_batch = X_eval[start:stop]
@@ -205,6 +222,8 @@ class Explainer:
                 **sampling_kwargs,
             )
 
+            # Compare each modified prediction with that observation's original prediction;
+            # its baseline loss is zero.
             for local_row, x in enumerate(X_eval_batch):
                 row = start + local_row
 
@@ -224,6 +243,8 @@ class Explainer:
         return feature_values, sampler
 
     def _feature_worker(self, feature_idx):
+        # Copy task state while keeping the predictive model and shared resources available
+        # to the worker.
         worker = copy.copy(self)
 
         # The parent owns the temporary workspace and its cleanup.
@@ -244,6 +265,7 @@ class Explainer:
         n_resamples_batch=100,  # this is the resample batch size.
         n_eval_batch=64,   # Observations per sampling call.
     ):
+        # Align evaluation columns with the background schema before converting to arrays.
         if isinstance(X_eval, pd.DataFrame) and self._uses_dataframe:
             X_eval = X_eval.loc[:, self.feature_names]
         
@@ -254,6 +276,7 @@ class Explainer:
                 "X_eval must have the same features as X_background."
             )
 
+        # Resolve feature names or integer indices in the caller's requested output order.
         if features is None:
             feature_indices = list(range(len(self.feature_names)))
         else:
@@ -264,6 +287,8 @@ class Explainer:
                 for feature in features
             ]
 
+        # Predict the original evaluation observations once, before any feature
+        # replacements.
         reference_predictions = self._predict(X_eval)
 
         n_workers = effective_n_jobs(self.n_jobs)
@@ -281,6 +306,8 @@ class Explainer:
                     "Parallel execution requires unique selected features."
                 )
 
+            # Use threads for shared TabPFN state; process workers isolate the other sampler
+            # tasks.
             if self.sampler_name == "tabpfn":
                 backend = "threading"
                 parallel_options = {}
@@ -325,6 +352,7 @@ class Explainer:
                 for feature_idx in feature_indices
             ]
 
+        # Restore requested column order and retain the fitted samplers returned by workers.
         values = np.empty((len(X_eval), len(feature_indices)))
 
         for column, (feature_idx, result) in enumerate(
@@ -343,6 +371,8 @@ class Explainer:
 
     def close(self):
         """Remove automatically created working files."""
+        # Release only an automatically created workspace; explicit output directories are
+        # preserved.
         if self._temporary_directory is not None:
             self._temporary_directory.cleanup()
             self._temporary_directory = None

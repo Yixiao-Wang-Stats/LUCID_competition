@@ -28,12 +28,16 @@ def relationship(
     keys 'correlation', 'values', and, when requested, 'predictability'.
     """
     values, names = _data(explanation)
+    # Use the supplied evaluation observations for both feature colors and pairwise
+    # correlations.
     matrix = _feature_data(X, names, len(values))
     indices = _order(values, names, order, max_display)
     if not 0 <= min_correlation <= 1:
         raise ValueError("min_correlation must be between zero and one.")
     categorical = set(categorical or [])
     scores = None
+    # Read optional caller-supplied predictability scores; this plot does not fit predictive
+    # models.
     if predictability is not None:
         scores = np.asarray(
             [predictability[name] for name in names]
@@ -43,8 +47,11 @@ def relationship(
         if scores.shape != (len(names),):
             raise ValueError("Provide one predictability score per feature.")
 
+    # Arrange correlation links, optional predictability bars, and LUCID distributions on
+    # aligned axes.
     keys = ["correlation", "values"]
     widths = [1, 3]
+    # Align supplied predictability scores with the displayed feature order.
     if scores is not None:
         keys.insert(1, "predictability")
         widths.insert(1, 1)
@@ -65,6 +72,8 @@ def relationship(
     network = axes["correlation"]
     norm = Normalize(-1, 1)
     palette = plt.get_cmap(correlation_cmap)
+    # Draw Pearson links only between noncategorical features, using color and width for
+    # signed strength.
     for left, j in enumerate(indices):
         if names[j] in categorical or j in categorical or _is_categorical(matrix[:, j]):
             continue
@@ -80,6 +89,7 @@ def relationship(
             if not np.isfinite(correlation) or abs(correlation) < min_correlation:
                 continue
             bend = max(0.05, 0.8 - 0.12 * (right - left))
+            # Connect the two feature positions with a curved path.
             path = Path(
                 [(1, left), (bend, left), (bend, right), (1, right)],
                 [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4],

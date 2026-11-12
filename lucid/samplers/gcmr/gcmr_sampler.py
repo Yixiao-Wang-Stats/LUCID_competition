@@ -8,6 +8,8 @@ def _to_gaussian_with_empirical_distribution_reference(sample, empirical_distrib
     # Since we don't have true CDF, we can only use empirical distribution
     reference_sample = np.asarray(empirical_distribution_reference_sample)
     sample = np.asarray(sample)
+    # Estimate marginal probabilities using midranks, retaining a finite range for normal
+    # quantiles.
     sorted_reference_sample = np.sort(reference_sample) 
     left = np.searchsorted(sorted_reference_sample,sample,side="left",)  # left point less than or equal to sample
     right = np.searchsorted(sorted_reference_sample,sample,side="right",)  # right point greater than sample
@@ -23,6 +25,7 @@ def _from_gaussian_with_empirical_distribution_reference(sample, empirical_distr
     sample = np.asarray(sample)
     sorted_reference_sample = np.sort(reference_sample)
 
+    # Map Gaussian values back through interpolated quantiles of the reference marginal.
     probabilities = norm.cdf(sample)
     reference_probabilities = (np.arange(len(sorted_reference_sample)) + 0.5) / len(sorted_reference_sample)  # probabilities in the empirical distribution
     probabilities = np.clip(probabilities, 0.5 / len(sorted_reference_sample),1.0 - 0.5 / len(sorted_reference_sample),)
@@ -54,6 +57,8 @@ class GCMRSampler(Sampler):
     def _fit_feature(self, X_train, feature_idx, feature_type):
         self.X_train = X_train
 
+        # Gaussianize each training marginal before fitting the conditional feature-mean
+        # model.
         Z_train = np.empty_like(X_train, dtype=float)
         for j in range(self.feature_size):
             Z_train[:, j] = (
@@ -119,6 +124,7 @@ class GCMRSampler(Sampler):
         conditional_mean_background = fitted_model.predict(
             gaussian_X_background_minus_j
         )
+        # Form the pooled residual distribution in Gaussianized space.
         residuals = (
             gaussian_X_background[:, feature_idx]
             - conditional_mean_background
@@ -134,6 +140,7 @@ class GCMRSampler(Sampler):
             + sampled_residuals
         )
 
+        # Transform generated feature values back to the original training marginal.
         return _from_gaussian_with_empirical_distribution_reference(
             gaussian_replacement_values,
             self.X_train[:, feature_idx],

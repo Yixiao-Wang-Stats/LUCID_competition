@@ -29,6 +29,8 @@ class CSPFISampler(Sampler):
 
 
     def _fit_feature(self, X_train, feature_idx, feature_type):
+        # Fit one tree partition per target feature and keep its feature-specific model
+        # files.
         fit_dir = self.output_dir / f"feature_{feature_idx}"
         fit_dir.mkdir(parents=True, exist_ok=True)
 
@@ -75,9 +77,13 @@ class CSPFISampler(Sampler):
         X_background_file = temporary_dir / "X_background.csv"
         output_file = temporary_dir / "samples.csv"
 
+        # Send evaluation observations and the background replacement pool as separate
+        # datasets.
         np.savetxt(X_eval_file, X_eval, delimiter=",")
         np.savetxt(X_background_file, X_background, delimiter=",")
 
+        # Use the saved tree to resample background values from each evaluation
+        # observation's leaf.
         subprocess.run(
             [
                 "Rscript",
@@ -95,6 +101,8 @@ class CSPFISampler(Sampler):
         replacement_values = np.loadtxt(
             output_file, delimiter=","
         )
+        # Restore (evaluation observations, replacement draws), including single-row CSV
+        # results.
         return np.asarray(replacement_values).reshape(
             len(X_eval), n_resamples
         )

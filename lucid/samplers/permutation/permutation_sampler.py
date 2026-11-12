@@ -5,10 +5,13 @@ from ..sampler import Sampler
 class PermutationSampler(Sampler):
     """Draw replacements from empirical background marginals."""
 
+    # Permutation needs no conditional model; replacements come directly from background
+    # feature values.
     def _fit_feature(self, X_train, feature_idx, feature_type):
         # No model estimation is needed; the base class registers the feature.
         return None
 
+    # Sample the marginal feature pool without conditioning on the evaluation observation.
     def _sample_feature(
         self,
         fitted_model,

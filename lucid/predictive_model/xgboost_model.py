@@ -16,6 +16,8 @@ class XGBoostModel(PredictiveModel):
         self.random_state = random_state
         self.kwargs = kwargs
 
+        # Wrap an XGBoost regressor for prediction or for estimating conditional feature
+        # means.
         self.model = xgb.XGBRegressor(
             objective=objective,
             random_state=random_state,
@@ -31,6 +33,8 @@ class XGBoostModel(PredictiveModel):
         X_train = np.asarray(X_train)
         y_train = np.asarray(y_train)
 
+        # Fit on the supplied target, which may be a feature when this wrapper is used by
+        # CMR or GCMR.
         self.model.fit(
             X_train,
             y_train,
@@ -74,6 +78,7 @@ class XGBoostModel(PredictiveModel):
     ):
         model = cls()
 
+        # Restore the fitted predictor directly without retraining it.
         model.model.load_model(path)
         model.is_fitted = True
 

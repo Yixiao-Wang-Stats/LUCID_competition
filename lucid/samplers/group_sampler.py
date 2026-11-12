@@ -21,12 +21,16 @@ class GroupSampler(Sampler):
         X_train, feature_indices, feature_types = self._prepare_group_fitting(
             X_train, feature_indices, feature_types
         )
+        # The first conditional factor uses only features outside the selected feature
+        # group.
         outside_group = [
             j for j in range(self.feature_size) if j not in feature_indices
         ]
         group_key = tuple(feature_indices)
         group_fits = []
 
+        # Fit each feature given outside features plus the preceding members of the feature
+        # group.
         for local_j, feature_idx in enumerate(feature_indices):
             conditioning_indices = outside_group + feature_indices[:local_j]
             fitted_model = self._fit_group_feature(
@@ -36,6 +40,7 @@ class GroupSampler(Sampler):
                 feature_type=feature_types[local_j],
                 group_key=group_key,
             )
+            # Retain each conditional model together with the column order it expects.
             group_fits.append({
                 "feature_idx": feature_idx,
                 "feature_type": feature_types[local_j],
@@ -67,6 +72,8 @@ class GroupSampler(Sampler):
         if len(X_eval) == 0:
             return samples
 
+        # Map original feature indices to their replacement positions within the feature
+        # group.
         feature_to_local = {
             feature_idx: local_j
             for local_j, feature_idx in enumerate(feature_indices)
@@ -75,13 +82,19 @@ class GroupSampler(Sampler):
 
         for local_j, factor_fit in enumerate(self.group_fits[group_key]):
             conditioning_indices = factor_fit["conditioning_indices"]
+            # The first factor draws all replacements directly from the original evaluation
+            # context.
             if local_j == 0:
                 X_predictors = X_eval[:, conditioning_indices]
                 count = n_resamples
             else:
+                # Later factors need a separate conditioning row for every evaluation
+                # observation and resampling path.
                 X_predictors = np.empty(
                     (n_eval, n_resamples, len(conditioning_indices))
                 )
+                # Use generated values for preceding feature-group members and observed
+                # values for outside features.
                 for column, feature_idx in enumerate(conditioning_indices):
                     if feature_idx in feature_to_local:
                         X_predictors[:, :, column] = samples[
@@ -90,6 +103,8 @@ class GroupSampler(Sampler):
                     else:
                         X_predictors[:, :, column] = X_eval[:, feature_idx, None]
                 # Keep each observation's resampling paths together.
+                # Flatten (evaluation observations, resampling paths) into rows and draw one
+                # value per row.
                 X_predictors = X_predictors.reshape(
                     n_eval * n_resamples, len(conditioning_indices)
                 )
@@ -102,6 +117,8 @@ class GroupSampler(Sampler):
                 X_background=X_background,
                 **sampling_kwargs,
             )
+            # Restore the evaluation-observation and replacement-draw axes for this
+            # feature-group member.
             samples[:, local_j, :] = np.asarray(replacement_values).reshape(
                 n_eval, n_resamples
             )
@@ -147,6 +164,7 @@ class GroupSampler(Sampler):
         ):
             raise ValueError("feature_indices contains an out-of-range feature index.")
 
+        # Resolve each feature-group member's type from the shared feature schema.
         expected_types = [
             self.feature_types[feature_idx]
             for feature_idx in feature_indices

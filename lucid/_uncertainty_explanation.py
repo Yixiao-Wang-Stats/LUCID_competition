@@ -28,6 +28,7 @@ class UncertaintyExplanation(Explanation):
 
         self.posterior_ids = posterior_ids
 
+        # Expose posterior-mean values through the same interface as ordinary explanations.
         super().__init__(
             values=self.posterior_values.mean(axis=0),
             feature_names=feature_names,
@@ -39,6 +40,8 @@ class UncertaintyExplanation(Explanation):
 
     def global_credible_interval(self, level=0.95):
         """Return bounds after averaging observations within each posterior draw."""
+        # Average evaluation observations within each posterior draw before taking global
+        # interval quantiles.
         global_draws = self.posterior_values.mean(axis=1)
         return self._interval(global_draws, level)
 
@@ -47,5 +50,7 @@ class UncertaintyExplanation(Explanation):
         if not 0 < level < 1:
             raise ValueError("level must be between zero and one.")
 
+        # Split the remaining probability equally between the two tails of the posterior
+        # draws.
         tail = (1 - level) / 2
         return np.quantile(values, [tail, 1 - tail], axis=0)

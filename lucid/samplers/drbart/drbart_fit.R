@@ -34,6 +34,7 @@ drbart_fit <- function(
     m_var = 100,
     variance = "ux"
 ) {
+    # Validate conditioning predictors and the continuous target before running MCMC.
     X_train <- as.matrix(X_train)
     y_train <- as.vector(y_train)
     if (nrow(X_train) != length(y_train)) {
@@ -44,6 +45,8 @@ drbart_fit <- function(
     prec_file <- file.path(output_dir, "dr_bart_prec.txt")
     fit_file <- file.path(output_dir, "fit.rds")
 
+    # Fit the conditional density and save mean and precision tree histories to the supplied
+    # paths.
     set.seed(seed)
     fit <- drbart::drbart(
         y = y_train,
@@ -58,11 +61,13 @@ drbart_fit <- function(
         prec_file = prec_file
     )
     saveRDS(fit, file=fit_file)
+    # Record the actual saved posterior count so Python can select valid draw IDs.
     posterior_count <- length(fit$fit$ucuts) 
     writeLines(as.character(posterior_count),file.path(output_dir, "posterior_count.txt")) 
     invisible(fit)
 }
 
+# Translate Python's positional arguments into fitting data and MCMC settings.
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) != 10L) {

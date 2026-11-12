@@ -18,6 +18,8 @@ def lucid_single_observation_single_feature(
 
     replacement_sample has shape (n_resamples,).
     """
+    # Treat one feature as a feature group of size one to reuse the joint-replacement
+    # calculation.
     return lucid_single_observation_group(
         x=x,
         y=y,
@@ -47,10 +49,13 @@ def lucid_single_observation_group(
         (group_size, n_resamples)
     """
 
+    # Convert inputs to arrays before checking their dimensions and feature indices.
     x = np.asarray(x)
     replacement_values = np.asarray(replacement_values)
     feature_indices = np.asarray(feature_indices,dtype=int)
 
+    # Check that each replacement row belongs to a distinct, valid feature in the feature
+    # group.
     if x.ndim != 1:
         raise ValueError("x must be a 1D feature vector.")
 
@@ -82,17 +87,22 @@ def lucid_single_observation_group(
     if n_resamples == 0:
         raise ValueError("replacement_values must not be empty.")
 
+    # Reuse the original observation's loss if supplied; otherwise evaluate it once.
     if baseline_loss is None:
         baseline_prediction = model(x.reshape(1,-1))
         baseline_loss = loss.prediction_loss(baseline_prediction,y,loss_type,).item()
 
     total_loss = 0.0
 
+    # Batch replacement draws to limit the number of observations sent to the predictive
+    # model.
     for start in range(
         0,
         n_resamples,
         n_resamples_batch,
     ):
+        # Each column is one joint feature-group draw; copy the observation and replace only
+        # those features.
         group_prime = replacement_values[:,start:start + n_resamples_batch,]
         current_batch_size = group_prime.shape[1]
         x_prime = np.repeat(
@@ -101,8 +111,11 @@ def lucid_single_observation_group(
             axis=0,
         ).astype(float)
         x_prime[:,feature_indices] = group_prime.T  # (current_batch_size, group_size)
+        # Evaluate all modified observations in this replacement batch against the same
+        # reference target.
         batch_loss = loss.prediction_loss(model(x_prime),y,loss_type,)
 
         total_loss += np.sum(batch_loss)
 
+    # Average over replacement draws and subtract the unmodified observation's loss.
     return total_loss / n_resamples - baseline_loss

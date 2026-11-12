@@ -1,5 +1,6 @@
 """Matplotlib plots for feature and group LUCID values."""
 
+# Expose plotting functions through lucid.plots.
 from ._bar import bar
 from ._beeswarm import beeswarm
 from ._observations import observations

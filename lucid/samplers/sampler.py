@@ -16,6 +16,7 @@ class Sampler(ABC):
         if feature_types is None:
             raise ValueError("feature_types must be provided.")
 
+        # Store one shared feature schema for fitting and sampling across all backends.
         self.feature_types = list(feature_types)
         if any(
             feature_type not in {"continuous", "binary", "categorical"}
@@ -25,10 +26,12 @@ class Sampler(ABC):
 
         self.feature_size = None
         self.is_fitted = False
+        # Index retained conditional fits by the target feature's original column index.
         self.fits = {}
 
     def fit(self, X_train, feature_idx, feature_type=None):
         """Fit and retain the conditional sampler for one feature."""
+        # Validate training data before delegating the backend-specific fitting step.
         X_train = self._prepare_fitting(
             X_train,
             feature_idx,
@@ -42,6 +45,8 @@ class Sampler(ABC):
             feature_type,
         )
 
+        # Retain the backend result, which may be a model object or a directory of model
+        # files.
         self.fits[feature_idx] = fitted_model
         self.is_fitted = True
         return self
@@ -58,6 +63,8 @@ class Sampler(ABC):
         if not self.is_fitted:
             raise RuntimeError("Sampler must be fitted before sampling.")
 
+        # Validate evaluation observations and allocate (n_eval, n_selected_features,
+        # n_resamples).
         X_eval, feature_indices, samples = self._prepare_sampling(
             X_eval,
             feature_indices,
@@ -65,6 +72,7 @@ class Sampler(ABC):
             n_features=self.feature_size,
         )
 
+        # Fill one output column per selected feature using its saved conditional fit.
         for local_j, feature_idx in enumerate(feature_indices):
             if feature_idx not in self.fits:
                 raise RuntimeError("The sampler has not been fitted for this feature.")
@@ -108,6 +116,7 @@ class Sampler(ABC):
         bounds = {} if bounds is None else bounds
         resolved = {}
 
+        # Resolve bounds only for continuous features, using explicit bounds when provided.
         for feature_idx, feature_type in enumerate(feature_types):
             if feature_type != "continuous":
                 continue
@@ -137,6 +146,7 @@ class Sampler(ABC):
         return resolved
 
     def _next_r_seed(self):
+        # Draw a reproducible integer seed for the next R call or backend random generator.
         return int(self.rng.integers(0,2**31 - 1))
 
     def _prepare_fitting(
@@ -164,6 +174,7 @@ class Sampler(ABC):
         if feature_type is not None and feature_type != self.feature_types[feature_idx]:
             raise ValueError("feature_type does not match feature_types[feature_idx].")
 
+        # Remember the feature count so later fitting and sampling use the same schema.
         self.feature_size = feature_size
         return X_train
 
@@ -198,6 +209,7 @@ class Sampler(ABC):
     def _prepare_workspace(output_dir):
         """Create the workspace used to exchange files with R."""
         output_dir = Path(output_dir)
+        # Create a dedicated location for files exchanged between Python and R.
         exchange_dir = output_dir / "exchange"
         exchange_dir.mkdir(parents=True, exist_ok=True)
         return output_dir, exchange_dir

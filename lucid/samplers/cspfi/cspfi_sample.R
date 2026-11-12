@@ -13,6 +13,8 @@ cspfi_sample <- function(fit,X,X_background,n_resamples,seed = 2026) {
     feature_types <- fit$schema$feature_types
     factor_levels <- fit$schema$factor_levels
     target_idx_r <- fit$feature_idx + 1L
+    # Apply the saved factor levels to both evaluation observations and background
+    # observations.
     for (j in seq_len(feature_size)) {
         if (feature_types[j] %in% c("binary","categorical")) {
             X[[j]] <- factor(X[[j]],levels = factor_levels[[j]])
@@ -26,6 +28,7 @@ cspfi_sample <- function(fit,X,X_background,n_resamples,seed = 2026) {
     if (!is.null(fit$constant_value)) {
         return(matrix(fit$constant_value,nrow = nrow(X),ncol = n_resamples))   # if all values of the target variable are the same then just keep it as constant
     }
+    # Assign evaluation and background observations to the same fitted partition.
     if (is.null(fit$model)) {
         X_nodes <- rep(1L,nrow(X))
         reference_nodes <- rep(1L,nrow(X_background))
@@ -33,6 +36,8 @@ cspfi_sample <- function(fit,X,X_background,n_resamples,seed = 2026) {
         X_nodes <- predict(fit$model,newdata = X,type = "node")
         reference_nodes <- predict(fit$model,newdata = X_background,type = "node")
     }
+    # For each evaluation observation, resample the target feature from background
+    # observations in its leaf.
     replacement_values <- t(vapply(seq_len(nrow(X)),function(i) {
         reference_ids <- which(reference_nodes == X_nodes[i])
         replacement_pool <- X_background[[target_idx_r]][reference_ids]
@@ -50,6 +55,7 @@ cspfi_sample <- function(fit,X,X_background,n_resamples,seed = 2026) {
     replacement_values
 }
 
+# Read Python's saved fit and datasets, then return replacements as a CSV matrix.
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 6L) {
     stop("Expected: fit_file X_file X_background_file output_file n_resamples seed.")

@@ -13,4 +13,6 @@ class Explanation:
 
     def global_importance(self):
         """Compute global LUCID by averaging over evaluation observations."""
+        # Average evaluation observations while preserving the feature or feature-group
+        # columns.
         return self.values.mean(axis=0)

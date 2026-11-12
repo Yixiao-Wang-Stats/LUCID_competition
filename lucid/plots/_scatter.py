@@ -24,6 +24,8 @@ def scatter(
     Return the Matplotlib axes; extra keywords go to ``ax.scatter``.
     """
     values, names = _data(explanation)
+    # Resolve the explanation column independently of the observed feature used for the
+    # horizontal axis.
     j = _index(feature, names)
     x_values, x_name = _column(X, feature if x is None else x, names)
     if len(x_values) != len(values):
@@ -32,6 +34,7 @@ def scatter(
         _, ax = plt.subplots(figsize=(6, 4))
 
     options = {"s": s, "alpha": alpha, "linewidths": 0}
+    # Distinguish a feature name used for point colors from a literal Matplotlib color.
     color_is_column = (
         isinstance(color, str)
         and color in (X.columns if hasattr(X, "columns") else names)
@@ -44,6 +47,8 @@ def scatter(
         options["color"] = color
     else:
         color_values, color_name = _column(X, color, names)
+        # Use discrete colors and legend entries for categories, or a continuous color scale
+        # otherwise.
         if categorical or _is_categorical(color_values):
             labels, codes, palette = _category_colors(color_values, cmap)
             options["c"] = palette[codes]

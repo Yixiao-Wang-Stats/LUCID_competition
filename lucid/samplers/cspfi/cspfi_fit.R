@@ -17,6 +17,7 @@ cspfi_fit <- function(X_train,output_dir,feature_types,feature_idx,seed = 2026) 
     if (anyNA(X_train)) {
         stop("X_train must not contain missing values.")
     }
+    # Restore numeric and factor columns before fitting the conditional partition.
     for (j in seq_len(feature_size)) {
         if (feature_types[j] %in% c("binary","categorical")) {
             if (feature_types[j] == "binary" && length(unique(X_train[[j]])) > 2L) {
@@ -43,6 +44,8 @@ cspfi_fit <- function(X_train,output_dir,feature_types,feature_idx,seed = 2026) 
     model <- NULL
     constant_value <- NULL
     # below follow the same logic of source code in cspfi/R/Conditional.R
+    # Use a constant result when possible; otherwise fit a transformation tree or
+    # classification tree.
     if (length(unique(y)) == 1L) {
         constant_value <- as.numeric(as.character(y[1L]))
     } else if (feature_size > 1L) {
@@ -67,6 +70,7 @@ cspfi_fit <- function(X_train,output_dir,feature_types,feature_idx,seed = 2026) 
             )
         }
     }
+    # Save the partition and feature schema needed to identify replacement pools later.
     fit <- list(
         model = model,
         feature_idx = feature_idx,
@@ -79,6 +83,7 @@ cspfi_fit <- function(X_train,output_dir,feature_types,feature_idx,seed = 2026) 
     invisible(fit)
 }
 
+# Read the target feature index and training files supplied by Python.
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 5L) {
     stop("Expected: X_train_file output_dir seed feature_types_file feature_idx.")

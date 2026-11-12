@@ -26,6 +26,8 @@ class TabPFNGroupSampler(GroupSampler):
         **model_kwargs,
     ):
         super().__init__(feature_types, random_state=random_state)
+        # Reuse TabPFN's feature fitting and sampling with the ordered feature-group
+        # contexts.
         self.tabpfn_sampler = TabPFNSampler(
             feature_types=self.feature_types,
             version=version,
@@ -42,6 +44,8 @@ class TabPFNGroupSampler(GroupSampler):
         # TabPFN requires predictors; an unconditional factor needs only a pool.
         if X_predictors.shape[1] == 0:
             return {"marginal_values": np.asarray(X_target).copy()}
+        # Fit this conditional factor on outside features and preceding feature-group
+        # members.
         return self.tabpfn_sampler._fit_model(
             X_predictors=X_predictors,
             X_target=X_target,
@@ -52,6 +56,8 @@ class TabPFNGroupSampler(GroupSampler):
         self, factor_fit, X_predictors, n_resamples, X_background
     ):
         fitted_model = factor_fit["fitted_model"]
+        # When no conditioning columns exist, sample the target feature's empirical
+        # marginal.
         if "marginal_values" in fitted_model:
             return self.tabpfn_sampler.rng.choice(
                 fitted_model["marginal_values"],

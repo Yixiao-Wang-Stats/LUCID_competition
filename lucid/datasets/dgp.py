@@ -1,3 +1,5 @@
+# These loaders return fixed bundled synthetic observations; they do not generate a new
+# random dataset.
 from ._loaders import _load_dataset
 
 

@@ -17,6 +17,7 @@ class GroupUncertaintyExplainer(GroupExplainer):
         self._factor_posterior_ids = {}
 
     def _compute_group(self, group_key, *args, **kwargs):
+        # Pass the selected posterior ID for each conditional factor of this feature group.
         return super()._compute_group(
             group_key,
             *args,
@@ -37,6 +38,8 @@ class GroupUncertaintyExplainer(GroupExplainer):
         if n_posterior_draws < 2:
             raise ValueError("n_posterior_draws must be at least two.")
 
+        # Resolve named feature groups to ordered indices without changing their output
+        # labels.
         resolved = {
             name: tuple(
                 self.feature_names.index(feature)
@@ -56,6 +59,8 @@ class GroupUncertaintyExplainer(GroupExplainer):
         rng = np.random.default_rng(self.random_state)
         posterior_ids = {}
 
+        # Select saved posterior draws separately for each conditional factor in each
+        # feature group.
         for name, key in resolved.items():
             sampler = self._get_group_sampler(key)
             selected = []
@@ -82,6 +87,8 @@ class GroupUncertaintyExplainer(GroupExplainer):
         posterior_values = []
 
         try:
+            # Keep one posterior draw per conditional factor fixed throughout this
+            # feature-group explanation.
             for draw in range(n_posterior_draws):
                 self._factor_posterior_ids = {
                     key: posterior_ids[name][draw]
@@ -96,9 +103,11 @@ class GroupUncertaintyExplainer(GroupExplainer):
                     n_eval_batch=n_eval_batch,
                 )
                 posterior_values.append(explanation.values)
+        # Clear feature-group posterior selections even if an explanation call fails.
         finally:
             self._factor_posterior_ids = {}
 
+        # Stack results as (posterior draws, evaluation observations, named feature groups).
         return UncertaintyExplanation(
             posterior_values=np.stack(posterior_values),
             feature_names=list(resolved),
