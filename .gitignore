@@ -27,7 +27,7 @@ results/
 
 # test file
 test/
-
+test.md
 # slurm
 slurm/
 

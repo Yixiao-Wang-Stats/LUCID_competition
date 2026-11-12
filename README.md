@@ -1,24 +1,3 @@
-# LUCID competition
-During the cleaning process our code env follows:
-
-```
-cd /home/users/yw676/projects/VI/LUCID_competition
-
-source /usr/xtmp/$USER/envs/lucid/bin/activate
-
-export R_LIBS_USER=/home/users/yw676/Rlibs
-export R_PROFILE_USER=/dev/null
-export R_ENVIRON_USER=/dev/null
-export PYTHONDONTWRITEBYTECODE=1
-```
-
-
-```
-source /usr/xtmp/$USER/envs/lucid_install_test/bin/activate
-```
-
-
-
 # LUCID
 
 **Local Understanding of Covariate Importance with Conditional Density Estimation**
