@@ -17,7 +17,7 @@ For a given predictive model $g$, observation $x$, and feature $j$,
 the prediction-based LUCID value is
 
 ```math
-\operatorname{LUCID}_j(x) = \mathbb{E}\left[\left(g(X'_j,x_{-j})-g(x)\right)^2 \mid X_{-j}=x_{-j}\right].
+\mathrm{LUCID}_j(x) = \mathbb{E}\left[\left(g(X'_j,x_{-j})-g(x)\right)^2 \mid X_{-j}=x_{-j}\right].
 ```
 
 Replacement values $X'_j$ are drawn from an estimated conditional distribution. Larger values indicate that plausible conditional replacements of the feature lead to greater changes in model predictions, suggesting that the feature provides unique predictive information beyond what is captured by the remaining features.
