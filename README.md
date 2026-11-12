@@ -52,7 +52,8 @@ whereas LUCID measures prediction sensitivity under feature replacement.
 
 ## Installation
 
-The current package requires Python 3.14.
+LUCID requires Python 3.12 or newer. The package has been tested on
+Python 3.14.
 
 Clone the repository and install LUCID:
 
