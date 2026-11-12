@@ -7,7 +7,7 @@ name = "lucid"
 version = "0.1.0"
 description = "Local and global variable importance for predictive models"
 readme = "README.md"
-requires-python = ">=3.14,<3.15"
+requires-python = ">=3.12"
 authors = [
     {name = "Yixiao Wang"},
 ]
