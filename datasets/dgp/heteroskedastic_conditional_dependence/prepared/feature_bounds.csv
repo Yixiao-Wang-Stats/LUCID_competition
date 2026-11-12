@@ -1,3 +1,0 @@
-feature_idx,feature_name,lower_bound,upper_bound,bound_source
-0,X1,-9.837275140821259,8.298535601114974,padded
-1,X2,-4.484250343670607,4.357787482805954,padded

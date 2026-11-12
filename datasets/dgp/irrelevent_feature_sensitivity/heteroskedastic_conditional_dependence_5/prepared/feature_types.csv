@@ -1,8 +1,0 @@
-feature_idx,feature_name,feature_type
-0,X1,continuous
-1,X2,continuous
-2,irrelevant_1,continuous
-3,irrelevant_2,continuous
-4,irrelevant_3,continuous
-5,irrelevant_4,continuous
-6,irrelevant_5,continuous
