@@ -22,6 +22,11 @@ the prediction-based LUCID value is
 
 Replacement values $X'_j$ are drawn from an estimated conditional distribution. Larger values indicate that plausible conditional replacements of the feature lead to greater changes in model predictions, suggesting that the feature provides unique predictive information beyond what is captured by the remaining features.
 
+**This package provides several replacement samplers**, including
+conditional distribution models based on TabPFN and DRBART, adversarial
+random forests, conditional subgroup permutation, and conditional mean
+residual methods. Marginal permutation is also available as a baseline.
+
 `explanation.values` contains the LUCID value for each evaluation observation and selected feature.
 
  `explanation.global_importance()` averages these values across evaluation observations to obtain CPFI.
@@ -58,13 +63,13 @@ python -m pip install ".[bayesian]"
 python -m pip install ".[xgboost]"
 ```
 
-The examples below use an XGBoost predictor and TabPFN sampling:
+The quick start examples below use an XGBoost predictor:
 
 ```bash
-python -m pip install ".[xgboost,tabpfn]"
+python -m pip install ".[xgboost]"
 ```
 
-R-backed samplers require the additional setup described below.
+R-backed samplers require additional dependencies. See [R setup](#r-setup).
 
 ## Quick start
 
@@ -99,13 +104,12 @@ feature_types = [
 explainer = lucid.Explainer(
     model,
     X_train,
-    sampler="tabpfn",
+    sampler="cmr",
     feature_types=feature_types,
     random_state=2026,
-    sampler_kwargs={
-        "version": "v3.5-fast",
-        "device": "cpu",
-    },
+    # To use TabPFN after completing its setup, replace sampler="cmr" with:
+    # sampler="tabpfn",
+    # sampler_kwargs={"version": "v3.5-fast"},
 )
 
 try:
@@ -132,6 +136,12 @@ callable. It must produce one numeric prediction per observation.
 Categorical input features must be represented numerically and identified
 through `feature_types`.
 
+For local TabPFN 3.5/3.5-Fast sampling on CPU, background datasets larger
+than 5,000 rows are blocked by default to avoid slow execution. Use a
+smaller background, a GPU, or hosted sampling; to override the guard, set
+`ignore_pretraining_limits=True` in `sampler_kwargs` or
+`TABPFN_ALLOW_CPU_LARGE_DATASET=1`. See [TabPFN setup](#tabpfn-setup).
+
 ## Samplers
 
 Select the replacement method through `sampler`.
@@ -148,6 +158,49 @@ Select the replacement method through `sampler`.
 
 Sampler-specific options belong in `sampler_kwargs`. The number of
 replacement draws, `n_resamples`, belongs in the explanation call.
+
+## Sampler references
+
+LUCID uses the following methods and software for feature replacement.
+When reporting results, cite LUCID and the references relevant to the
+samplers and model versions used.
+
+| Sampler | References |
+|---|---|
+| TabPFN | Version-specific references listed below |
+| DRBART | [Orlandi et al. (2021)](https://arxiv.org/abs/2112.12259) |
+| ARF | [Watson et al. (2023)](https://proceedings.mlr.press/v206/watson23a.html); [Blesch et al. (2025)](https://doi.org/10.1609/aaai.v39i15.33712) |
+| CSPFI | [Molnar et al. (2024)](https://doi.org/10.1007/s10618-022-00901-9) |
+| CMR | [Fisher et al. (2019)](https://jmlr.org/papers/v20/18-760.html); [Chamma et al. (2023)](https://arxiv.org/abs/2309.07593) |
+| GCMR | [Borgonovo et al. (2026)](https://arxiv.org/abs/2604.11253) |
+
+CMR and GCMR are implemented within LUCID using residual resampling
+in the original and Gaussianized feature spaces, respectively.
+These references describe the underlying constructions; the implementations
+use LUCID's background-data and sampling interfaces.
+
+For binary and categorical features, the DRBART sampler uses BART models
+implemented with [PyMC-BART](https://www.pymc.io/projects/bart/en/latest/).
+
+### TabPFN versions
+
+Please cite the paper or technical report associated with the model
+version used:
+
+- **v2:** Hollmann et al. (2025),
+  [Accurate predictions on small data with a tabular foundation model](https://doi.org/10.1038/s41586-024-08328-6).
+- **v2.5:** Grinsztajn et al. (2025),
+  [TabPFN-2.5: Advancing the State of the Art in Tabular Foundation Models](https://arxiv.org/abs/2511.08667).
+- **v2.6:** Identify the exact checkpoint release and follow its
+  model-card citation guidance. See the
+  [upstream TabPFN documentation](https://github.com/PriorLabs/TabPFN).
+- **v3:** Grinsztajn et al. (2026),
+  [TabPFN-3: Technical Report](https://arxiv.org/abs/2605.13986).
+- **v3.5 and v3.5-fast:** Jäger et al. (2026),
+  [TabPFN-3.5: Technical Report](https://arxiv.org/abs/2609.17895).
+
+For complete BibTeX entries, see the
+[upstream citation instructions](https://github.com/PriorLabs/TabPFN#citation).
 
 ### TabPFN setup
 
@@ -204,11 +257,8 @@ install.packages(
     repos = "https://cloud.r-project.org"
 )
 
-remotes::install_github(
-    "vittorioorlandi/drbart",
-    ref = "66178ffdbf75c2a0a499cea917f9526073561f98",
-    upgrade = "never"
-)
+# install.packages("devtools")
+devtools::install_github('vittorioorlandi/drbart', ref = 'main')
 ```
 
 Building packages from source may require compilers and development
@@ -217,6 +267,7 @@ libraries. Follow the upstream package instructions for your platform.
 If you use a custom R library, configure `R_LIBS_USER` before starting
 Python. The Python installation does not install R or its packages.
 
+Windows users: Installing R packages from source may require Rtools, which provides the necessary compilation tools.
 
 ## Feature-group importance
 
@@ -409,8 +460,10 @@ R version and relevant R package versions.
 
 ## License
 
-The software license will be specified before release.
+LUCID is distributed under the [MIT License](LICENSE).
 
-The accompanying paper is available under the license shown on its
-arXiv record. Third-party software, pretrained weights, hosted services,
-and datasets retain their respective licenses and terms.
+The accompanying paper is distributed under the license specified on its
+[arXiv record](https://arxiv.org/abs/2610.35740).
+
+Third-party dependencies, pretrained models, hosted services, and bundled
+datasets are subject to their respective licenses and terms.
