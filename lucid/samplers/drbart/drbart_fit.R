@@ -102,36 +102,3 @@ drbart_fit(
 )
 
 
-
-
-
-
-
-
-# # test
-# set.seed(2026)
-
-# n <- 100
-
-# X_train <- cbind(
-#     x1 = rnorm(n),
-#     x2 = rnorm(n)
-# )
-
-# y_train <- (
-#     2 * X_train[, 1]
-#     - X_train[, 2]
-#     + rnorm(n)
-# )
-# fit <- drbart_fit(
-#     X_train = X_train,
-#     y_train = y_train,
-#     output_dir = "results/tests/test_package/test_drbart",
-#     seed = 2026,
-#     nburn = 10,
-#     nsim = 20,
-#     nthin = 1,
-#     m_mean = 20,
-#     m_var = 10,
-#     variance = "ux"
-# )
