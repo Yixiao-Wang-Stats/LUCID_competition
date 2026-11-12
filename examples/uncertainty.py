@@ -27,7 +27,7 @@ explainer = lucid.UncertaintyExplainer(
 )
 
 
-explanation = explainer(X_test, features=["horsepower"])
+explanation = explainer(X_test.iloc[:50], features=["horsepower"])
 lower, upper = explanation.credible_interval()
 global_lower, global_upper = explanation.global_credible_interval()
 

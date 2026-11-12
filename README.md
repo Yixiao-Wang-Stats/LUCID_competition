@@ -274,6 +274,11 @@ Windows users: Installing R packages from source may require Rtools, which provi
 Use `GroupExplainer` to replace several features jointly. Group sampling
 is available with TabPFN and DRBART.
 
+Group importance measures how predictions change when a group is replaced
+conditional on the features outside that group. It can reveal shared
+predictive information that individual conditional importance may miss
+when group members strongly predict one another.
+
 ```python
 explainer = lucid.GroupExplainer(
     model,
@@ -288,7 +293,7 @@ try:
     group_explanation = explainer(
         X_eval,
         groups={
-            "weather": ["temp", "hum"],
+            "weather": ["temp", "hum", "season"],
             "calendar": ["hr", "workingday", "season"],
         },
         n_resamples=1000,

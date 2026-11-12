@@ -3,7 +3,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import Normalize
-from matplotlib.lines import Line2D
 
 from ._utils import (
     CMAP, COLOR, _category_colors, _colorbar, _data, _feature_data,
@@ -20,7 +19,7 @@ def beeswarm(
 
     X must have the same row order; DataFrame columns are matched by name.
     Numeric colors are scaled within each feature unless norm is supplied.
-    List nominal feature names/indices in categorical for discrete legends.
+    List nominal feature names/indices in categorical for discrete colors.
     For group explanations, omit X to use a uniform color. Return the axes.
     """
     values, names = _data(explanation)
@@ -30,7 +29,6 @@ def beeswarm(
     if ax is None:
         _, ax = plt.subplots(figsize=(7, max(2, 0.5 * len(indices) + 1)))
 
-    handles = []
     numeric_points = None
     for position, j in enumerate(indices):
         offsets = _swarm_offsets(values[:, j])
@@ -38,13 +36,8 @@ def beeswarm(
         if matrix is None:
             options["color"] = color
         elif names[j] in categorical or j in categorical or _is_categorical(matrix[:, j]):
-            labels, codes, palette = _category_colors(matrix[:, j], cmap)
+            _, codes, palette = _category_colors(matrix[:, j], cmap)
             options["c"] = palette[codes]
-            handles.extend(
-                Line2D([], [], marker="o", linestyle="none", color=shade,
-                       label=f"{names[j]}: {label}")
-                for label, shade in zip(labels, palette)
-            )
         else:
             feature_values = np.asarray(matrix[:, j], dtype=float)
             if norm is None:
@@ -62,6 +55,4 @@ def beeswarm(
     _summary_axis(ax, [names[j] for j in indices], "LUCID value")
     if colorbar and numeric_points is not None:
         _colorbar(ax, numeric_points, colorbar_kwargs, relative=norm is None)
-    if handles:
-        ax.legend(handles=handles, frameon=False)
     return ax

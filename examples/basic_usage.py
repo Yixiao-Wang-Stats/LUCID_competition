@@ -13,7 +13,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 model = XGBRegressor(random_state=2026)
 model.fit(X_train, y_train)
-X_eval = X_test
+X_eval = X_test.iloc[:50]
 
 feature_types = [
     "categorical" if name in {"hr", "season"}
