@@ -19,186 +19,424 @@ source /usr/xtmp/$USER/envs/lucid_install_test/bin/activate
 
 
 
+# LUCID
+
+**Local Understanding of Covariate Importance with Conditional Density Estimation**
+
+LUCID is a Python package for explaining predictive models through conditional feature replacement. It provides observation-level and global conditional variable importance (CPFI) for individual features and feature groups, along with posterior uncertainty estimates when using MCMC-based conditional models.
+
+This repository accompanies:
+
+**Yixiao Wang, Srikar Katta, Jon Donnelly, Emanuele Borgonovo, and Cynthia Rudin.**
+[LUCID: Local Understanding of Covariate Importance with Conditional Density Estimation](https://arxiv.org/abs/2610.35740).
+arXiv:2610.35740, 2026.
 
 
+## What LUCID measures
+
+For a given predictive model $g$, observation $x$, and feature $j$,
+the prediction-based LUCID value is
+
+$$
+\operatorname{LUCID}_j(x)
+=
+\mathbb{E}\left[
+\left(g(X'_j,x_{-j})-g(x)\right)^2
+\mid X_{-j}=x_{-j}
+\right].
+$$
+
+Replacement values $X'_j$ are drawn from an estimated conditional distribution. Larger values indicate that plausible conditional replacements of the feature lead to greater changes in model predictions, suggesting that the feature provides unique predictive information beyond what is captured by the remaining features.
+
+`explanation.values` contains the LUCID value for each evaluation observation and selected feature.
+
+ `explanation.global_importance()` averages these values across evaluation observations to obtain CPFI.
 
 
+The background data determine the distributions used for replacement. They usually come from the predictive model's training data. Evaluation data identify the observations to explain.
 
+## Installation
 
+The current package requires Python 3.14.
 
-
-
-# LUCID supplementary code
-
-
-
-
-
-
-
-
-
-
-
-This directory contains the calculation package, datasets, experiment
-scripts, and examples for reproducing one feature on one held-out fold.
-All commands below run from this directory. All experiment outputs go to `results/`.
-
-## Code structure
-
-```text
-package/src/
-  LUCID_calculation/         losses and single-feature/group calculations
-  predictive_model/         predictive-model interface and XGBoost wrapper
-  sampler/                  permutation, DR-BART, CMR, GCMR, ARF, CSPFI,
-                            clique, LOCO, and analytic oracle samplers
-scripts/experiments_lucid/   experiment, attribution, uncertainty, and aggregation entry points
-scripts/data_preparation/   DGP generation, known models, and data preparation helpers
-datasets/dgp/               five prepared DGPs, compressed sensitivity data, fold/model specifications
-datasets/bike_sharing/      bike data, prepared folds, frozen XGBoost models
-examples/                   sequential single-fold examples and submission comments
-env/                        Python requirements and R installation instructions/script
-results/                    generated outputs (created at runtime)
-```
-
-
-## Create a new Python environment
-
-Use Python 3.14 and R 4.5.2 for the documented setup.
-R must be installed before installing `pyshapr`
-because its Python bridge uses `rpy2`.
+Clone the repository and install LUCID:
 
 ```bash
-python3.14 -m venv env/.venv
-source env/.venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r env/requirements.txt
+git clone https://github.com/Yixiao-Wang-Stats/LUCID_competition.git
+cd LUCID_competition
+
+python -m pip install .
 ```
 
-`env/requirements.txt` pins the direct dependencies. For the complete Python
-dependency list, install `env/requirements-lock.txt` instead.
-The calculation scripts import PyMC and PyMC-BART even when another sampler is
-selected. `pymc-bart==0.13.1` provides the `PosteriorSampler` import used here.
-
-## Create an independent R library
-
-Use a new library inside this directory; no personal R library is needed.
-On Linux, building the R dependencies requires C/C++ and Fortran compilers,
-GNU make, R development headers, and development libraries for curl, OpenSSL,
-XML, and ICU.
+Install optional dependencies for the samplers you intend to use:
 
 ```bash
-mkdir -p env/R/library results/tmp
-export R_LIBS_USER="$PWD/env/R/library"
-export TMPDIR="$PWD/results/tmp"
-Rscript --vanilla env/install_r.R
+# Local TabPFN
+python -m pip install ".[tabpfn]"
+
+# Hosted TabPFN
+python -m pip install ".[hosted]"
+
+# Python Bayesian components used by DRBART
+python -m pip install ".[bayesian]"
+
+# XGBoost conditional mean models for CMR and GCMR
+python -m pip install ".[xgboost]"
 ```
 
-The installation script installs `arf`, `mlt`, `partykit`, `trtf`, and `shapr`
-from CRAN, and `drbart` from its upstream repository. It also installs their
-dependencies and writes the installed versions to `results/r_versions.csv`.
-The reference R versions are listed in `env/r-packages.csv`; the DR-BART source
-commit is pinned by the installer. Other R packages are installed from CRAN.
-DR-BART follows the [upstream installation instructions](https://github.com/vittorioorlandi/drbart).
-ARF is available on [CRAN](https://cran.r-project.org/package=arf), as is
-[trtf](https://cran.r-project.org/package=trtf).
-
-After installation, use a clean R startup so that local profile files cannot
-inject a different library. Set the same library each time you activate the
-Python environment:
+The examples below use an XGBoost predictor and TabPFN sampling:
 
 ```bash
-source env/.venv/bin/activate
-export R_LIBS_USER="$PWD/env/R/library"
-export R_PROFILE_USER=/dev/null
-export R_ENVIRON_USER=/dev/null
-export PYTHONDONTWRITEBYTECODE=1
-mkdir -p results/tmp
-export TMPDIR="$PWD/results/tmp"
+python -m pip install ".[xgboost,tabpfn]"
 ```
 
-## Smallest running units
+R-backed samplers require the additional setup described below.
 
-Prepare all sensitivity folds with `python -B -m scripts.data_preparation.prepare_submission`.
-The submission stores their data columns once in a compressed archive; preparation
-restores the original CSVs using the recorded fold assignments and verifies every
-file's SHA-256 checksum. It does not generate new observations or train models.
-The DGP sensitivity experiments use the supplied analytic models. Their unused
-XGBoost models are omitted. The five baseline DGPs and bike sharing remain prepared.
-Both examples automatically run preparation for the selected fold before any method;
-already prepared files are reused.
+## Quick start
 
-Each command below runs one method on one feature and one fold. A positive
-evaluation limit uses the first held-out rows; training still uses the full
-training fold. These reduced runs are smoke checks, not full experimental results.
+Load Bike Sharing, fit a predictive model, and explain held-out observations.
+This small example uses 1,000 training observations and 20 evaluation
+observations.
+
+```python
+from sklearn.model_selection import train_test_split
+from xgboost import XGBRegressor
+
+import lucid
+
+X, y = lucid.datasets.bikesharing()
+X_train, X_eval, y_train, _ = train_test_split(
+    X, y,
+    train_size=1000,
+    test_size=20,
+    random_state=2026,
+)
+
+model = XGBRegressor(random_state=2026)
+model.fit(X_train, y_train)
+
+feature_types = [
+    "categorical" if name in {"hr", "season"}
+    else "binary" if name == "workingday"
+    else "continuous"
+    for name in X.columns
+]
+
+explainer = lucid.Explainer(
+    model,
+    X_train,
+    sampler="tabpfn",
+    feature_types=feature_types,
+    random_state=2026,
+    sampler_kwargs={
+        "version": "v3.5-fast",
+        "device": "cpu",
+    },
+)
+
+try:
+    explanation = explainer(
+        X_eval,
+        features=["temp", "hum"],
+        n_resamples=1000,
+    )
+finally:
+    explainer.close()
+
+print(explanation.values)
+print(explanation.global_importance())
+```
+
+The output has shape `(20, 2)`: one row per evaluation observation and
+one column per selected feature.
+
+Omit `features` to explain all features. Set `n_jobs` in the constructor
+to control concurrent feature tasks.
+
+The model may be a fitted estimator with a `predict` method or a prediction
+callable. It must produce one numeric prediction per observation.
+Categorical input features must be represented numerically and identified
+through `feature_types`.
+
+## Samplers
+
+Select the replacement method through `sampler`.
+
+| Sampler | Replacement method | Additional requirements |
+|---|---|---|
+| `tabpfn` | TabPFN conditional predictions | `tabpfn` or `hosted` extra |
+| `drbart` | Continuous density regression and categorical BART | `bayesian` extra, R, and R dependencies |
+| `arf` | Adversarial random forest | R and `arf` |
+| `cspfi` | Conditional subgroup permutation | R, `mlt`, `partykit`, and `trtf` |
+| `cmr` | Conditional mean residual resampling | `xgboost` extra for the default mean model |
+| `gcmr` | Gaussian conditional mean residual resampling | `xgboost` extra for the default mean model |
+| `permutation` | Marginal feature resampling | Basic installation |
+
+Sampler-specific options belong in `sampler_kwargs`. The number of
+replacement draws, `n_resamples`, belongs in the explanation call.
+
+### TabPFN setup
+
+For local execution, TabPFN downloads its pretrained weights on first use
+and stores them in its user cache. Follow the
+[TabPFN authentication and license instructions](https://github.com/PriorLabs/TabPFN#-faq).
+
+LUCID does not bundle pretrained TabPFN weights or authentication tokens.
+
+The default device selection is automatic. Select a device explicitly
+through `sampler_kwargs`:
+
+```python
+sampler_kwargs={
+    "version": "v3.5-fast",
+    "backend": "local",
+    "device": "cuda",
+}
+```
+
+For offline execution, download the checkpoint beforehand and provide
+`model_path`, or configure TabPFN's model cache directory.
+
+For hosted execution, install the `hosted` extra, configure your own
+TabPFN client authentication, and use:
+
+```python
+sampler_kwargs={
+    "version": "v3.5-fast",
+    "backend": "hosted",
+}
+```
+
+Hosted execution sends data to the external service. Refer to the provider's
+documentation for service terms and data handling.
+
+### R setup
+
+DRBART, ARF, and CSPFI require an R installation with `Rscript` available
+on the system path. Install R using the instructions for your operating
+system from [CRAN](https://cran.r-project.org/).
+
+Verify the installation:
 
 ```bash
-# Synthetic regime_dependent DGP: x_1 is named X1 in the supplied CSV.
-bash examples/dgp_x1.sh --fold 0 --methods permutation \
-  --evaluation-limit 8 --replacement-samples 100
-
-# Bike sharing: hum is feature index 3; the outcome is y.
-bash examples/bike_hum.sh --fold 0 --methods permutation \
-  --evaluation-limit 8 --replacement-samples 100
-
-# Sensitivity variant: same example, with 20 added irrelevant features.
-bash examples/dgp_x1.sh \
-  --prepared-dir datasets/dgp/irrelevent_feature_sensitivity/regime_dependent_20/prepared \
-  --fold 0 --methods permutation --evaluation-limit 8 --replacement-samples 100
+Rscript --version
 ```
 
-To run every method sequentially once on the complete fold:
+Install the packages needed by the R-backed samplers in an R session:
 
-```bash
-bash examples/dgp_x1.sh --fold 0
-bash examples/bike_hum.sh --fold 0
+```r
+install.packages(
+    c("arf", "mlt", "partykit", "trtf", "truncnorm", "remotes"),
+    repos = "https://cloud.r-project.org"
+)
+
+remotes::install_github(
+    "vittorioorlandi/drbart",
+    ref = "66178ffdbf75c2a0a499cea917f9526073561f98",
+    upgrade = "never"
+)
 ```
 
-Both examples run permutation, DR-BART, CMR, GCMR, ARF, CSPFI, clique, LOCO,
-SHAP, LIME, and SHAPr. The DGP example also runs analytic `optimal_lucid`
-and `optimal_loco`. Analytic oracles are unavailable for bike sharing.
-SHAP/LIME/SHAPr explain the model prediction and are attribution baselines;
-their values are not loss differences and should not be equated to LUCID.
-Attribution scripts compute all features together; the example additionally
-saves the requested feature column separately.
+Building packages from source may require compilers and development
+libraries. Follow the upstream package instructions for your platform.
 
-The DGP uses its known optimal predictive model and `prediction_reference.csv`
-with evaluation target `prediction`, following the original experiment entry
-point. Bike sharing uses the frozen fold-specific XGBoost model and
-`outcome_reference.csv` with target `y`. Preparation restores missing packaged data;
-predictive models are not refitted. Conditional samplers and LOCO are fitted as usual.
-DR-BART retains the original 2,000 burn-in and 2,000 sampling iterations.
-It can take substantially longer than the other methods.
+If you use a custom R library, configure `R_LIBS_USER` before starting
+Python. The Python installation does not install R or its packages.
 
-Progress prints `[i/N] START` followed by `[i/N] DONE` or `FAILED` and streams
-the method output. The default stops on the first failure; use
-`--continue-on-error` to collect statuses for every method. The command returns
-a nonzero exit code if any method failed.
 
-## Outputs and other submission options
+## Feature-group importance
 
-For each case, the output structure is:
+Use `GroupExplainer` to replace several features jointly. Group sampling
+is available with TabPFN and DRBART.
 
-```text
-results/<case>/<feature>/seed_2026/
-  <method>/fold_0/feature_<index>.npy
-  <method>/fold_0/sampler_fit/         methods that save a fit
-  <method>/fold_0/attributions.npy    attribution methods: all feature columns
-  <method>_fold_0.log
-  status_fold_0.json
+```python
+explainer = lucid.GroupExplainer(
+    model,
+    X_train,
+    sampler="tabpfn",
+    feature_types=feature_types,
+    random_state=2026,
+    sampler_kwargs={"version": "v3.5-fast"},
+)
+
+try:
+    group_explanation = explainer(
+        X_eval,
+        groups={
+            "weather": ["temp", "hum"],
+            "calendar": ["hr", "workingday", "season"],
+        },
+        n_resamples=1000,
+    )
+finally:
+    explainer.close()
+
+print(group_explanation.values)
+print(group_explanation.global_importance())
 ```
 
-`feature_0.npy` corresponds to DGP X1; `feature_3.npy` corresponds to bike hum.
-Status records contain exit codes and elapsed times. Logs redact the current
-supplementary root and home/temporary paths. Shared exchange/cache directories
-are under `results/`. Multiple folds can be run using `--fold 0` through `--fold 4`.
-The example shell scripts include commented Slurm, separate-method, and
-background submission commands. Activate the environment and export the R
-library before submission. Scheduler time/memory limits are examples and may
-need adjustment to your cluster.
+Each output column represents one named group. Group values are computed
+by joint replacement; they are not sums of individual feature values.
 
-The original entry points can also be called with `python -B -m
-scripts.experiments_lucid.experiments_lucid --help`. Always pass prepared-data,
-target, feature-type and output paths explicitly; the inherited defaults describe
-a different dataset. Aggregation scripts expect all features and folds, so they
-are not needed for these one-feature, one-fold examples.
+Groups may overlap. Member order determines the sequential conditional
+sampling order. `n_jobs` controls concurrent group tasks.
+
+## Posterior uncertainty
+
+`UncertaintyExplainer` uses posterior draws from fitted DRBART/BART
+conditional models. The predictive model remains fixed.
+
+```python
+explainer = lucid.UncertaintyExplainer(
+    model,
+    X_train,
+    sampler="drbart",
+    feature_types=feature_types,
+    random_state=2026,
+)
+
+try:
+    uncertainty = explainer(
+        X_eval.iloc[:3],
+        features=["hum"],
+        n_posterior_draws=100,
+        n_resamples=1000,
+    )
+finally:
+    explainer.close()
+
+lower, upper = uncertainty.credible_interval(level=0.95)
+global_lower, global_upper = uncertainty.global_credible_interval(level=0.95)
+```
+
+`n_posterior_draws` selects the number of conditional-model posterior draws.
+`n_resamples` controls replacement draws for each posterior draw and
+evaluation observation.
+
+These intervals describe conditional-model posterior uncertainty with the
+predictive model held fixed. Finite resampling also introduces Monte Carlo
+variation. They do not account for uncertainty from retraining the
+predictive model.
+
+See [the Auto MPG uncertainty example](examples/uncertainty.py).
+Group uncertainty is available through `GroupUncertaintyExplainer`.
+
+## Plots
+
+Plot functions return Matplotlib axes for further customization.
+
+```python
+import matplotlib.pyplot as plt
+
+lucid.plots.bar(explanation)
+
+lucid.plots.beeswarm(
+    explanation,
+    X_eval,
+    categorical=["hr", "workingday", "season"],
+    cmap="viridis",
+)
+
+lucid.plots.scatter(
+    explanation,
+    X_eval,
+    feature="hum",
+    color="temp",
+    cmap="viridis",
+)
+
+lucid.plots.observations(
+    explanation,
+    observations=range(8),
+    ncols=4,
+)
+
+plt.show()
+```
+
+The rows of `X_eval` must match the explanation rows in order.
+
+`lucid.plots.relationship` combines a feature-correlation display with
+LUCID distributions. Its default links represent Pearson correlations;
+they are not estimated conditional predictability scores.
+
+See the [introductory notebook](examples/introduction.ipynb) for all plots
+and group visualizations.
+
+## Datasets and examples
+
+Bundled datasets return a pandas feature DataFrame and target Series:
+
+```python
+X, y = lucid.datasets.bikesharing()
+X, y = lucid.datasets.auto_mpg()
+X, y = lucid.datasets.dgp.extreme_tail()
+```
+
+The bundled real datasets are prepared versions of
+[Bike Sharing](https://archive.ics.uci.edu/dataset/275/bike+sharing+dataset)
+and [Auto MPG](https://archive.ics.uci.edu/dataset/9/auto+mpg).
+They are not necessarily identical to the original source files.
+
+| Example | Contents |
+|---|---|
+| [Basic usage](examples/basic_usage.py) | Bike Sharing feature importance and plots |
+| [Group importance](examples/group_importance.py) | Joint importance of feature groups |
+| [Uncertainty](examples/uncertainty.py) | Auto MPG with DRBART posterior intervals |
+| [Introduction](examples/introduction.ipynb) | Calculation and visualization walkthrough |
+
+## Intermediate files
+
+Some samplers write fitted models and exchange files.
+
+By default, LUCID uses a system temporary directory. Call
+`explainer.close()` when finished to release its temporary workspace.
+
+To retain intermediate files, provide an explicit directory:
+
+```python
+explainer = lucid.Explainer(
+    model,
+    X_train,
+    sampler="drbart",
+    feature_types=feature_types,
+    output_dir="outputs/drbart",
+)
+```
+
+An explicitly supplied output directory is retained after `close()`.
+Explanation values remain available in the returned explanation object.
+
+## Citation
+
+If you use LUCID in your research, please cite:
+
+```bibtex
+@misc{wang2026lucid,
+  title = {{LUCID}: Local Understanding of Covariate Importance
+           with Conditional Density Estimation},
+  author = {Wang, Yixiao and Katta, Srikar and Donnelly, Jon and Borgonovo, Emanuele and Rudin, Cynthia},
+  year = {2026},
+  eprint = {2610.35740},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.LG},
+  url = {https://arxiv.org/abs/2610.35740}
+}
+```
+
+## Questions and issues
+
+Please report bugs and usage questions through
+[GitHub Issues](https://github.com/Yixiao-Wang-Stats/LUCID_competition/issues).
+
+Include your LUCID version, Python version, operating system, sampler,
+and a minimal reproducible example. For R-backed samplers, include the
+R version and relevant R package versions.
+
+## License
+
+The software license will be specified before release.
+
+The accompanying paper is available under the license shown on its
+arXiv record. Third-party software, pretrained weights, hosted services,
+and datasets retain their respective licenses and terms.
