@@ -26,4 +26,7 @@ results/
 !.env.example
 
 # test file
-test
+test/
+
+# slurm
+slurm/

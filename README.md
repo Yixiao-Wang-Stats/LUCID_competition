@@ -13,7 +13,9 @@ export PYTHONDONTWRITEBYTECODE=1
 ```
 
 
-
+```
+source /usr/xtmp/$USER/envs/lucid_install_test/bin/activate
+```
 
 
 

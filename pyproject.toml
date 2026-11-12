@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lucid-vi"
+version = "0.1.0"
+description = "Local and global variable importance for predictive models"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+authors = [
+    {name = "Yixiao Wang"},
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "matplotlib",
+    "joblib",
+]
+
+[project.optional-dependencies]
+xgboost = [
+    "xgboost",
+]
+bayesian = [
+    "pymc==6.3.2",
+    "pymc-bart==0.13.1",
+]
+tabpfn = [
+    "tabpfn==9.2.0",
+]
+hosted = [
+    "tabpfn==9.2.0",
+    "tabpfn-client==0.7.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lucid", "lucid.*"]
+exclude = ["lucid.datasets.data", "lucid.datasets.data.*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"lucid.datasets" = ["data/*.csv", "data/dgp/*.csv"]
+"lucid.samplers.arf" = ["*.R"]
+"lucid.samplers.cspfi" = ["*.R"]
+"lucid.samplers.drbart" = ["*.R"]
