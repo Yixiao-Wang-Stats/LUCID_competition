@@ -6,86 +6,6 @@ features.** It holds the other features fixed, replaces the selected
 feature with plausible values from its conditional distribution, and
 averages the squared changes in prediction. 
 
-## Why local and conditional importance?
-
-Variable importance commonly assigns a single importance score to each
-feature. However, understanding a model also requires knowing where a
-feature matters and how strongly it affects individual predictions.
-A global average can hide regions of both strong and weak local importance.
-
-[![Model predictions and exact local importance compared with the global average.](examples/figures/lucid_teaser_overview.svg)](examples/figures/lucid_teaser_overview.pdf)
-
-In this example, changing Feature 1 changes predictions, while changing
-Feature 2 does nothing. Yet Feature 1’s importance varies across
-observations, even with Feature 2 fixed. One global score cannot show that pattern.
-
-**The replacement values matter, too.** The upper-left and lower-right
-regions contain few observations. Replacements that ignore feature
-dependence can create such unusual combinations, forcing the model to
-extrapolate into regions where its behavior may be unreliable.
-
-[![Conditional and marginal replacement distributions for the selected observation.](examples/figures/lucid_teaser_replacement.svg)](examples/figures/lucid_teaser_replacement.pdf)
-
-At the star, we keep Feature 2 fixed and replace Feature 1 using its
-conditional distribution. This respects the relationship between the
-features. LUCID measures the resulting average squared prediction change,
-revealing how much Feature 1 matters for this observation.
-
-The example uses correlated Gaussian features and given predictive model `g(x) = x1²`. 
-
-## What the package provides
-
-LUCID provides observation-level importance for individual features and
-feature groups. Averaging these values over evaluation observations gives
-global importance summaries. DRBART-based samplers additionally support
-posterior uncertainty estimates.
-
-## Paper
-
-This repository accompanies:
-
-**Yixiao Wang, Srikar Katta, Jon Donnelly, Emanuele Borgonovo, and Cynthia Rudin.**
-[LUCID: Local Understanding of Covariate Importance with Conditional Density Estimation](examples/figures/https://arxiv.org/abs/2610.35740).
-arXiv:2610.35740, 2026.
-
-## LUCID definition
-
-For a given predictive model $g$, observation $x$, and feature $j$,
-the prediction-based LUCID value is
-
-```math
-\mathrm{LUCID}_j(x) = \mathbb{E}\left[\left(g(X'_j,x_{-j})-g(x)\right)^2 \mid X_{-j}=x_{-j}\right].
-```
-
-Replacement values $X'_j$ are drawn from an estimated conditional distribution. Larger values indicate that plausible conditional replacements of the feature lead to greater changes in model predictions, suggesting that the feature provides unique predictive information beyond what is captured by the remaining features.
-
-**This package provides several replacement samplers**, including
-conditional distribution models based on TabPFN and DRBART, adversarial
-random forests, conditional subgroup permutation, and conditional mean
-residual methods. Marginal permutation is also available as a baseline.
-
-`explanation.values` contains the LUCID value for each evaluation observation and selected feature.
-
- `explanation.global_importance()` averages these values across evaluation observations to obtain CPFI.
-
-
-The background data determine the distributions used for replacement. They usually come from the predictive model's training data. Evaluation data identify the observations to explain.
-
-If you are familiar with SHAP, LUCID follows a similar workflow:
-
-```python
-# SHAP
-explainer = shap.Explainer(model, X_background)
-explanation = explainer(X_eval)
-
-# LUCID
-explainer = lucid.Explainer(model, X_background, sampler="cmr")
-explanation = explainer(X_eval)
-```
-
-Both return explanation objects with a `.values` attribute, but the values
-measure different quantities: SHAP provides additive feature attributions,
-whereas LUCID measures prediction sensitivity under feature replacement.
 
 ## Installation
 
@@ -195,6 +115,85 @@ than 5,000 rows are blocked by default to avoid slow execution. Use a
 smaller background, a GPU, or hosted sampling; to override the guard, set
 `ignore_pretraining_limits=True` in `sampler_kwargs` or
 `TABPFN_ALLOW_CPU_LARGE_DATASET=1`. See [TabPFN setup](#tabpfn-setup).
+
+
+## Why local and conditional importance?
+
+Variable importance commonly assigns a single importance score to each
+feature. However, understanding a model also requires knowing where a
+feature matters and how strongly it affects individual predictions.
+A global average can hide regions of both strong and weak local importance.
+
+[![Model predictions and exact local importance compared with the global average.](examples/figures/lucid_teaser_overview.svg)](examples/figures/lucid_teaser_overview.pdf)
+
+In this example, changing Feature 1 changes predictions, while changing
+Feature 2 does nothing. Yet Feature 1’s importance varies across
+observations, even with Feature 2 fixed. One global score cannot show that pattern.
+
+**The replacement values matter, too.** The upper-left and lower-right
+regions contain few observations. Replacements that ignore feature
+dependence can create such unusual combinations, forcing the model to
+extrapolate into regions where its behavior may be unreliable.
+
+[![Conditional and marginal replacement distributions for the selected observation.](examples/figures/lucid_teaser_replacement.svg)](examples/figures/lucid_teaser_replacement.pdf)
+
+At the star, we keep Feature 2 fixed and replace Feature 1 using its
+conditional distribution. This respects the relationship between the
+features. LUCID measures the resulting average squared prediction change,
+revealing how much Feature 1 matters for this observation.
+
+The example uses correlated Gaussian features and given predictive model `g(x) = x1²`. 
+
+## What the package provides
+
+LUCID provides observation-level importance for individual features and feature groups. Averaging these values over evaluation observations gives global importance summaries. DRBART-based samplers additionally support posterior uncertainty estimates.
+
+## Paper
+
+This repository accompanies:
+
+**Yixiao Wang, Srikar Katta, Jon Donnelly, Emanuele Borgonovo, and Cynthia Rudin.**
+[LUCID: Local Understanding of Covariate Importance with Conditional Density Estimation](examples/figures/https://arxiv.org/abs/2610.35740).
+arXiv:2610.35740, 2026.
+
+## LUCID definition
+
+For a given predictive model $g$, observation $x$, and feature $j$,
+the prediction-based LUCID value is
+
+```math
+\mathrm{LUCID}_j(x) = \mathbb{E}\left[\left(g(X'_j,x_{-j})-g(x)\right)^2 \mid X_{-j}=x_{-j}\right].
+```
+
+Replacement values $X'_j$ are drawn from an estimated conditional distribution. Larger values indicate that plausible conditional replacements of the feature lead to greater changes in model predictions, suggesting that the feature provides unique predictive information beyond what is captured by the remaining features.
+
+**This package provides several replacement samplers**, including
+conditional distribution models based on TabPFN and DRBART, adversarial
+random forests, conditional subgroup permutation, and conditional mean
+residual methods. Marginal permutation is also available as a baseline.
+
+`explanation.values` contains the LUCID value for each evaluation observation and selected feature.
+
+ `explanation.global_importance()` averages these values across evaluation observations to obtain CPFI.
+
+
+The background data determine the distributions used for replacement. They usually come from the predictive model's training data. Evaluation data identify the observations to explain.
+
+If you are familiar with SHAP, LUCID follows a similar workflow:
+
+```python
+# SHAP
+explainer = shap.Explainer(model, X_background)
+explanation = explainer(X_eval)
+
+# LUCID
+explainer = lucid.Explainer(model, X_background, sampler="cmr")
+explanation = explainer(X_eval)
+```
+
+Both return explanation objects with a `.values` attribute, but the values
+measure different quantities: SHAP provides additive feature attributions,
+whereas LUCID measures prediction sensitivity under feature replacement.
 
 ## Samplers
 
