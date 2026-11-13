@@ -1,8 +1,47 @@
-# LUCID
+# Local Understanding of Covariate Importance with Conditional Density Estimation (LUCID)
 
-**Local Understanding of Covariate Importance with Conditional Density Estimation**
+**LUCID measures how much a model’s prediction depends on a feature for
+a particular observation, while accounting for relationships between
+features.** It holds the other features fixed, replaces the selected
+feature with plausible values from its conditional distribution, and
+averages the squared changes in prediction. 
 
-LUCID is a Python package for explaining predictive models through conditional feature replacement. It provides observation-level and global conditional variable importance (CPFI) for individual features and feature groups, along with posterior uncertainty estimates when using MCMC-based conditional models.
+## Why local and conditional importance?
+
+Variable importance commonly assigns a single importance score to each
+feature. However, understanding a model also requires knowing where a
+feature matters and how strongly it affects individual predictions.
+A global average can hide regions of both strong and weak local importance.
+
+[![Model predictions and exact local importance compared with the global average.](lucid_teaser_overview.svg)](lucid_teaser_overview.pdf)
+
+In this example, changing Feature 1 changes predictions, while changing
+Feature 2 does nothing. Yet Feature 1’s importance varies across
+observations, even with Feature 2 fixed. One global score cannot show
+that pattern.
+
+**The replacement values matter, too.** The upper-left and lower-right
+regions contain few observations. Replacements that ignore feature
+dependence can create such unusual combinations, forcing the model to
+extrapolate into regions where its behavior may be unreliable.
+
+[![Conditional and marginal replacement distributions for the selected observation.](lucid_teaser_replacement.svg)](lucid_teaser_replacement.pdf)
+
+At the star, we keep Feature 2 fixed and replace Feature 1 using its
+conditional distribution. This respects the relationship between the
+features. LUCID measures the resulting average squared prediction change,
+revealing how much Feature 1 matters for this observation.
+
+The example uses correlated Gaussian features and given predictive model `g(x) = x1²`. 
+
+## What the package provides
+
+LUCID provides observation-level importance for individual features and
+feature groups. Averaging these values over evaluation observations gives
+global importance summaries. DRBART-based samplers additionally support
+posterior uncertainty estimates.
+
+## Paper
 
 This repository accompanies:
 
@@ -10,8 +49,7 @@ This repository accompanies:
 [LUCID: Local Understanding of Covariate Importance with Conditional Density Estimation](https://arxiv.org/abs/2610.35740).
 arXiv:2610.35740, 2026.
 
-
-## What LUCID measures
+## LUCID definition
 
 For a given predictive model $g$, observation $x$, and feature $j$,
 the prediction-based LUCID value is
@@ -400,6 +438,28 @@ lucid.plots.observations(
 
 plt.show()
 ```
+
+The figures below use an XGBoost predictor and local TabPFN 3.5-Fast
+sampling on Bike Sharing: 6,916 background observations, all 1,729 held-out
+evaluation observations, and 1,000 replacement draws per feature. The
+observation panels show the first eight evaluation rows. Click a figure
+to open its PDF.
+
+**Global importance over the evaluation observations**
+
+[![Mean LUCID for each Bike Sharing feature.](examples/figures/bikesharing_bar.svg)](examples/figures/bikesharing_bar.pdf)
+
+**Observation-level importance distributions**
+
+[![LUCID values for all held-out Bike Sharing observations, colored by feature value.](examples/figures/bikesharing_beeswarm.svg)](examples/figures/bikesharing_beeswarm.pdf)
+
+**Humidity importance, colored by temperature**
+
+[![Humidity LUCID against observed humidity, with temperature shown by color.](examples/figures/bikesharing_scatter.svg)](examples/figures/bikesharing_scatter.pdf)
+
+**Individual explanations for eight observations**
+
+[![Feature LUCID values for eight evaluation observations arranged in four columns.](examples/figures/bikesharing_observations.svg)](examples/figures/bikesharing_observations.pdf)
 
 The rows of `X_eval` must match the explanation rows in order.
 
