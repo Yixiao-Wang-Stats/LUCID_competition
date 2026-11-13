@@ -13,7 +13,7 @@ feature. However, understanding a model also requires knowing where a
 feature matters and how strongly it affects individual predictions.
 A global average can hide regions of both strong and weak local importance.
 
-[![Model predictions and exact local importance compared with the global average.](lucid_teaser_overview.svg)](lucid_teaser_overview.pdf)
+[![Model predictions and exact local importance compared with the global average.](examples/figures/lucid_teaser_overview.svg)](examples/figures/lucid_teaser_overview.pdf)
 
 In this example, changing Feature 1 changes predictions, while changing
 Feature 2 does nothing. Yet Feature 1’s importance varies across
@@ -25,7 +25,7 @@ regions contain few observations. Replacements that ignore feature
 dependence can create such unusual combinations, forcing the model to
 extrapolate into regions where its behavior may be unreliable.
 
-[![Conditional and marginal replacement distributions for the selected observation.](lucid_teaser_replacement.svg)](lucid_teaser_replacement.pdf)
+[![Conditional and marginal replacement distributions for the selected observation.](examples/figures/lucid_teaser_replacement.svg)](examples/figures/lucid_teaser_replacement.pdf)
 
 At the star, we keep Feature 2 fixed and replace Feature 1 using its
 conditional distribution. This respects the relationship between the
@@ -46,7 +46,7 @@ posterior uncertainty estimates.
 This repository accompanies:
 
 **Yixiao Wang, Srikar Katta, Jon Donnelly, Emanuele Borgonovo, and Cynthia Rudin.**
-[LUCID: Local Understanding of Covariate Importance with Conditional Density Estimation](https://arxiv.org/abs/2610.35740).
+[LUCID: Local Understanding of Covariate Importance with Conditional Density Estimation](examples/figures/https://arxiv.org/abs/2610.35740).
 arXiv:2610.35740, 2026.
 
 ## LUCID definition
