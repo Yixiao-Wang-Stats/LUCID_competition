@@ -17,8 +17,7 @@ A global average can hide regions of both strong and weak local importance.
 
 In this example, changing Feature 1 changes predictions, while changing
 Feature 2 does nothing. Yet Feature 1’s importance varies across
-observations, even with Feature 2 fixed. One global score cannot show
-that pattern.
+observations, even with Feature 2 fixed. One global score cannot show that pattern.
 
 **The replacement values matter, too.** The upper-left and lower-right
 regions contain few observations. Replacements that ignore feature
